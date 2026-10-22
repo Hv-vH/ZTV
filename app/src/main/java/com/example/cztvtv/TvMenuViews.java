@@ -20,6 +20,9 @@ final class TvMenuViews {
     static final int BLUE = 0xFF639BFF;
     static final int MINT = 0xFF59DFC3;
     private static final int FOCUSED_SECONDARY = 0xFFD9E8FF;
+    private static final Typeface MEDIUM = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+    private static final ColorStateList LIVE_PROGRESS = ColorStateList.valueOf(MINT);
+    private static final ColorStateList FOCUS_PROGRESS = ColorStateList.valueOf(0xFFD5EBFF);
 
     private TvMenuViews() {}
 
@@ -52,19 +55,31 @@ final class TvMenuViews {
         view.setTextColor(color);
         view.setIncludeFontPadding(false);
         if (medium) {
-            view.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            view.setTypeface(MEDIUM);
         }
         return view;
     }
 
     abstract static class FocusCard extends LinearLayout {
         boolean playing;
+        private final GradientDrawable[] backgrounds = new GradientDrawable[3];
+        private int appearance = -1;
 
         FocusCard(Context context) {
             super(context);
             setFocusable(true);
             setFocusableInTouchMode(true);
             setGravity(Gravity.CENTER_VERTICAL);
+            int[][] colors = {{0xFF172236, 0xFF141E30}, {0xFF153B3D, 0xFF112B30},
+                    {0xFF377FF4, 0xFF2965CF}};
+            int[] strokes = {0xFF223149, 0xFF2B6863, 0xFF9BBFFF};
+            for (int i = 0; i < backgrounds.length; i++) {
+                GradientDrawable background = new GradientDrawable(
+                        GradientDrawable.Orientation.TL_BR, colors[i]);
+                background.setCornerRadius(dp(context, 12));
+                background.setStroke(dp(context, i == 2 ? 1.5f : 1f), strokes[i]);
+                backgrounds[i] = background;
+            }
         }
 
         @Override
@@ -74,18 +89,20 @@ final class TvMenuViews {
         }
 
         final void updateStyle() {
+            updateStyle(false);
+        }
+
+        final void updateStyle(boolean contentColorsChanged) {
             boolean focused = hasFocus();
-            int[] colors = focused ? new int[]{0xFF377FF4, 0xFF2965CF}
-                    : playing ? new int[]{0xFF153B3D, 0xFF112B30}
-                    : new int[]{0xFF172236, 0xFF141E30};
-            GradientDrawable background = new GradientDrawable(
-                    GradientDrawable.Orientation.TL_BR, colors);
-            background.setCornerRadius(dp(getContext(), 12));
-            background.setStroke(dp(getContext(), focused ? 1.5f : 1f),
-                    focused ? 0xFF9BBFFF : playing ? 0xFF2B6863 : 0xFF223149);
-            setBackground(background);
-            setElevation(dp(getContext(), focused ? 5 : 0));
-            updateContentColors(focused);
+            int next = focused ? 2 : playing ? 1 : 0;
+            if (appearance != next) {
+                appearance = next;
+                setBackground(backgrounds[next]);
+                setElevation(dp(getContext(), focused ? 5 : 0));
+                updateContentColors(focused);
+            } else if (contentColorsChanged) {
+                updateContentColors(focused);
+            }
         }
 
         abstract void updateContentColors(boolean focused);
@@ -96,9 +113,13 @@ final class TvMenuViews {
         private final TextView name;
         private final TextView program;
         private final TextView badge;
+        private final GradientDrawable focusBadge;
+        private final GradientDrawable liveBadge;
 
         ChannelCard(Context context) {
             super(context);
+            focusBadge = surface(context, 0x33203970, 0, 5);
+            liveBadge = surface(context, 0xFF174D45, 0, 5);
             setOrientation(HORIZONTAL);
             setPadding(dp(context, 12), dp(context, 12), dp(context, 12), dp(context, 12));
             setMinimumHeight(dp(context, 72));
@@ -130,12 +151,15 @@ final class TvMenuViews {
 
         void bind(int index, String channelName, String programName, boolean isPlaying) {
             playing = isPlaying;
-            number.setText(getContext().getString(R.string.tv_channel_number, index + 1));
-            name.setText(channelName);
-            program.setText(programName);
+            setTextIfChanged(number, getContext().getString(R.string.tv_channel_number, index + 1));
+            setTextIfChanged(name, channelName);
+            setTextIfChanged(program, programName);
             badge.setVisibility(isPlaying ? View.VISIBLE : View.GONE);
-            setContentDescription(getContext().getString(R.string.channel_row,
-                    index + 1, channelName, programName));
+            String description = getContext().getString(R.string.channel_row,
+                    index + 1, channelName, programName);
+            if (!TextUtils.equals(description, getContentDescription())) {
+                setContentDescription(description);
+            }
             updateStyle();
         }
 
@@ -148,8 +172,7 @@ final class TvMenuViews {
             name.setTextColor(TEXT);
             program.setTextColor(focused ? FOCUSED_SECONDARY : MUTED);
             badge.setTextColor(focused ? TEXT : MINT);
-            badge.setBackground(surface(getContext(),
-                    focused ? 0x33203970 : 0xFF174D45, 0, 5));
+            badge.setBackground(focused ? focusBadge : liveBadge);
         }
     }
 
@@ -159,10 +182,16 @@ final class TvMenuViews {
         private final TextView title;
         private final TextView badge;
         private final ProgressBar progress;
+        private final GradientDrawable focusBadge;
+        private final GradientDrawable liveBadge;
+        private final GradientDrawable idleBadge;
         private boolean past;
 
         ProgramCard(Context context) {
             super(context);
+            focusBadge = surface(context, 0x33203970, 0, 6);
+            liveBadge = surface(context, 0xFF174D45, 0, 6);
+            idleBadge = surface(context, 0xFF202E44, 0, 6);
             setOrientation(HORIZONTAL);
             setPadding(dp(context, 16), dp(context, 12), dp(context, 14), dp(context, 12));
             setMinimumHeight(dp(context, 68));
@@ -187,7 +216,8 @@ final class TvMenuViews {
             content.addView(title);
             progress = new ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal);
             progress.setMax(1000);
-            progress.setProgressTintList(ColorStateList.valueOf(MINT));
+            progress.setIndeterminate(false);
+            progress.setProgressTintList(LIVE_PROGRESS);
             progress.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2B5151));
             LayoutParams progressParams = new LayoutParams(LayoutParams.MATCH_PARENT, dp(context, 3));
             progressParams.topMargin = dp(context, 10);
@@ -202,16 +232,17 @@ final class TvMenuViews {
         void bind(String programTitle, String startTime, String endTime, String stateLabel,
                   boolean isPlaying, boolean hasEnded, int completed) {
             playing = isPlaying;
+            boolean contentColorsChanged = past != hasEnded;
             past = hasEnded;
-            start.setText(startTime);
-            end.setText(endTime);
-            title.setText(programTitle);
-            badge.setText(stateLabel);
+            setTextIfChanged(start, startTime);
+            setTextIfChanged(end, endTime);
+            setTextIfChanged(title, programTitle);
+            setTextIfChanged(badge, stateLabel);
             progress.setVisibility(playing ? View.VISIBLE : View.GONE);
             progress.setProgress(completed);
             setContentDescription(getContext().getString(R.string.guide_program_row,
                     startTime, endTime, stateLabel, programTitle));
-            updateStyle();
+            updateStyle(contentColorsChanged);
         }
 
         void updateProgress(int completed) {
@@ -229,9 +260,14 @@ final class TvMenuViews {
             start.setTextColor(focused ? TEXT : playing ? MINT : past ? MUTED : TEXT);
             end.setTextColor(focused ? FOCUSED_SECONDARY : MUTED);
             badge.setTextColor(focused ? TEXT : playing ? MINT : MUTED);
-            badge.setBackground(surface(getContext(),
-                    focused ? 0x33203970 : playing ? 0xFF174D45 : 0xFF202E44, 0, 6));
-            progress.setProgressTintList(ColorStateList.valueOf(focused ? 0xFFD5EBFF : MINT));
+            badge.setBackground(focused ? focusBadge : playing ? liveBadge : idleBadge);
+            progress.setProgressTintList(focused ? FOCUS_PROGRESS : LIVE_PROGRESS);
+        }
+    }
+
+    static void setTextIfChanged(TextView view, CharSequence text) {
+        if (!TextUtils.equals(view.getText(), text)) {
+            view.setText(text);
         }
     }
 }
