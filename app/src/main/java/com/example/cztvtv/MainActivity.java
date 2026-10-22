@@ -681,7 +681,13 @@ public class MainActivity extends Activity {
     }
 
     private void switchChannel(int index) {
-        currentChannelIndex = wrapChannelIndex(index);
+        int targetIndex = wrapChannelIndex(index);
+        if (targetIndex == currentChannelIndex) {
+            // 确认当前频道时只收起菜单，保留正在播放的网页和直播状态。
+            setMenuVisible(false);
+            return;
+        }
+        currentChannelIndex = targetIndex;
         selectedChannelIndex = currentChannelIndex;
         loadGeneration++;
         setMenuVisible(false);
@@ -825,8 +831,6 @@ public class MainActivity extends Activity {
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                     if (guideFocused) {
                         returnToChannels();
-                    } else {
-                        setMenuVisible(false);
                     }
                 }
             }
