@@ -1,0 +1,25 @@
+.gradle/
+build/
+*/build/
+.idea/
+local.properties
+*.iml
+.toolchain/
+
+# macOS metadata
+.DS_Store
+
+# Android build artifacts and signing credentials
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+*.jks
+*.keystore
+keystore.properties
+
+# Local environment configuration
+.env
+.env.*
+!.env.example

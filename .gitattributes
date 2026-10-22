@@ -1,0 +1,6 @@
+# Normalize text in Git while keeping platform-specific script endings.
+* text=auto
+*.sh text eol=lf
+/gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
