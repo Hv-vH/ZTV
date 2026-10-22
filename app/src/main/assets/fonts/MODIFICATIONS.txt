@@ -1,0 +1,12 @@
+ZTV Han Regular / ZTV Han Medium
+
+Derived from Adobe Source Han Sans CN 2.005, under the SIL Open Font License 1.1.
+The variable source is instantiated at weights 400 and 500, then subset to the
+GB2312 repertoire, ASCII and common punctuation. Font family and PostScript
+names are changed to ZTV Han to respect the upstream Reserved Font Names.
+Characters outside this subset use Android's normal system font fallback.
+Copyright and license name records are preserved. See source-han-license.txt.
+
+IBM Plex Sans Regular is distributed unmodified; see plex-license.txt.
+
+Rebuild: tools/prepare-tv-fonts.py, using the official upstream source font.

@@ -4,7 +4,6 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -18,6 +17,7 @@ import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
@@ -30,6 +30,10 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -56,6 +60,12 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private TextView status;
+    private TvLoadingView loadingView;
+    private String playerScript;
+    private Runnable videoRetry;
+    private int playbackCheckGeneration;
+    private boolean videoReady;
+    private boolean playbackFailed;
     private LinearLayout channelMenu;
     private ProgramGuideManager programGuideManager;
     private TextView guideTitle;
@@ -145,6 +155,8 @@ public class MainActivity extends Activity {
                     }
                 }, this::onProgramGuideChanged
         );
+        TvMenuViews.prepare(this);
+        playerScript = loadPlayerScript();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -154,6 +166,12 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
         ));
+
+        loadingView = new TvLoadingView(this);
+        root.addView(loadingView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        loadingView.show(currentChannel().name, currentChannelIndex, CHANNELS.length,
+                R.string.loading_connecting, false);
 
         status = createStatusView();
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
@@ -211,6 +229,10 @@ public class MainActivity extends Activity {
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
+                if (!isCurrentChannelPage(url)) {
+                    return;
+                }
+                beginLoading(R.string.loading_connecting);
                 // 页面加载期间先保持黑屏，避免把网页头部、频道列表短暂显示到电视上。
                 v.evaluateJavascript(
                         "(function(){document.documentElement.style.background='#000';"
@@ -222,8 +244,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
-                setStatus("正在连接 " + currentChannel().name + "…");
-                tryStartVideo(0, loadGeneration);
+                if (isCurrentChannelPage(url) && !playbackFailed) {
+                    startVideoCheck(false);
+                }
             }
 
             @Override
@@ -244,13 +267,31 @@ public class MainActivity extends Activity {
                     WebResourceRequest request,
                     android.webkit.WebResourceError error
             ) {
-                if (request.isForMainFrame()) {
-                    setStatus("网页加载失败，请检查电视网络");
+                if (request.isForMainFrame()
+                        && isCurrentChannelPage(request.getUrl().toString())) {
+                    showPlaybackFailure();
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView v, WebResourceRequest request,
+                                            WebResourceResponse response) {
+                if (request.isForMainFrame() && response.getStatusCode() >= 400
+                        && isCurrentChannelPage(request.getUrl().toString())) {
+                    showPlaybackFailure();
                 }
             }
         });
 
+        android.graphics.Bitmap emptyPoster = android.graphics.Bitmap.createBitmap(
+                1, 1, android.graphics.Bitmap.Config.ARGB_8888);
+        emptyPoster.eraseColor(Color.BLACK);
         view.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public android.graphics.Bitmap getDefaultVideoPoster() {
+                return emptyPoster;
+            }
+
             @Override
             public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
                 if (BuildConfig.DEBUG) {
@@ -265,11 +306,13 @@ public class MainActivity extends Activity {
     }
 
     private TextView createStatusView() {
-        TextView view = new TextView(this);
-        view.setTextColor(Color.WHITE);
-        view.setTextSize(16);
+        TextView view = TvMenuViews.text(this, 14, TvMenuViews.TEXT, false);
         view.setPadding(dp(18), dp(10), dp(18), dp(10));
-        view.setBackground(TvMenuViews.surface(this, 0xEE101D32, 0xFF345075, 12));
+        view.setBackground(TvMenuViews.surface(this, 0xF21A1E1B, TvMenuViews.BORDER, 12));
+        android.graphics.drawable.Drawable signal = getDrawable(R.drawable.live_signal);
+        signal.setBounds(0, 0, dp(18), dp(18));
+        view.setCompoundDrawables(signal, null, null, null);
+        view.setCompoundDrawablePadding(dp(8));
         return view;
     }
 
@@ -277,13 +320,12 @@ public class MainActivity extends Activity {
         LinearLayout overlay = new LinearLayout(this);
         overlay.setOrientation(LinearLayout.VERTICAL);
         overlay.setPadding(dp(32), dp(22), dp(32), dp(16));
-        overlay.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR, new int[]{0xFF101A2D, 0xFF080F1C}));
+        overlay.setBackgroundColor(TvMenuViews.BACKGROUND);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         ImageView brand = new ImageView(this);
-        brand.setImageResource(R.drawable.ic_brand);
+        brand.setImageResource(R.drawable.brand_mark);
         header.addView(brand, new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout brandText = new LinearLayout(this);
         brandText.setOrientation(LinearLayout.VERTICAL);
@@ -300,15 +342,19 @@ public class MainActivity extends Activity {
         header.addView(brandText, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        watchingInfo = menuText(13, TvMenuViews.MINT);
+        watchingInfo = menuText(13, TvMenuViews.AMBER);
         watchingInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
-        watchingInfo.setBackground(TvMenuViews.surface(this, 0xFF123330, 0xFF24544C, 8));
+        watchingInfo.setBackground(TvMenuViews.surface(this, 0xFF25251F, 0xFF514733, 24));
+        android.graphics.drawable.Drawable signal = getDrawable(R.drawable.live_signal);
+        signal.setBounds(0, 0, dp(21), dp(21));
+        watchingInfo.setCompoundDrawables(signal, null, null, null);
+        watchingInfo.setCompoundDrawablePadding(dp(6));
         header.addView(watchingInfo);
         LinearLayout clockPanel = new LinearLayout(this);
         clockPanel.setOrientation(LinearLayout.VERTICAL);
         clockPanel.setGravity(Gravity.END);
         clockPanel.setPadding(dp(24), 0, 0, 0);
-        menuClock = TvMenuViews.text(this, 25, TvMenuViews.TEXT, true);
+        menuClock = TvMenuViews.numberText(this, 28, TvMenuViews.TEXT);
         clockPanel.addView(menuClock);
         menuDay = menuText(11, TvMenuViews.MUTED);
         LinearLayout.LayoutParams dayParams = new LinearLayout.LayoutParams(
@@ -329,7 +375,7 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(16), dp(12), dp(12));
-        panel.setBackground(TvMenuViews.surface(this, 0xFF101A2B, 0xFF233149, 20));
+        panel.setBackground(TvMenuViews.surface(this, TvMenuViews.PANEL, TvMenuViews.BORDER, 16));
         float screenDp = getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density;
         body.addView(panel, new LinearLayout.LayoutParams(
@@ -358,7 +404,7 @@ public class MainActivity extends Activity {
             TvMenuViews.ChannelCard row = new TvMenuViews.ChannelCard(this);
             bindChannelRow(row, index);
             row.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
+                if (hasFocus && !(menuVisible && guideFocused)) {
                     guideFocused = false;
                     selectedChannelIndex = index;
                     updateNavigationHints();
@@ -387,11 +433,11 @@ public class MainActivity extends Activity {
         heading.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titleGroup = new LinearLayout(this);
         titleGroup.setOrientation(LinearLayout.VERTICAL);
-        TextView kicker = menuText(12, TvMenuViews.BLUE);
+        TextView kicker = menuText(12, TvMenuViews.AMBER);
         kicker.setText(R.string.tv_guide_label);
         kicker.setLetterSpacing(0.08f);
         titleGroup.addView(kicker);
-        guideTitle = TvMenuViews.text(this, 27, TvMenuViews.TEXT, true);
+        guideTitle = TvMenuViews.text(this, 28, TvMenuViews.TEXT, true);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         titleParams.topMargin = dp(7);
@@ -408,9 +454,14 @@ public class MainActivity extends Activity {
         guideRefresh.setFocusableInTouchMode(true);
         guideRefresh.setBackground(TvMenuViews.buttonBackground(this));
         guideRefresh.setOnFocusChangeListener((v, focused) -> {
-            if (focused) {
+            guideRefresh.setTextColor(focused ? TvMenuViews.INK : TvMenuViews.TEXT);
+            guideRefresh.getCompoundDrawables()[0].setTint(
+                    focused ? TvMenuViews.INK : TvMenuViews.TEXT);
+            if (focused && !pendingProgramFocus) {
                 guideFocused = true;
                 selectedProgramIndex = -1;
+                channelScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
                 updateNavigationHints();
             }
         });
@@ -429,8 +480,8 @@ public class MainActivity extends Activity {
         guideList.setDividerHeight(dp(6));
         guideList.setSelector(new ColorDrawable(Color.TRANSPARENT));
         guideList.setItemsCanFocus(true);
-        guideList.setFocusable(false);
-        guideList.setFocusableInTouchMode(false);
+        guideList.setFocusable(true);
+        guideList.setFocusableInTouchMode(true);
         programAdapter = new ProgramAdapter();
         guideList.setAdapter(programAdapter);
         guidePanel.addView(guideList, new LinearLayout.LayoutParams(
@@ -439,7 +490,7 @@ public class MainActivity extends Activity {
         guideMessage.setPadding(dp(24), dp(30), dp(24), dp(30));
         guideMessage.setLineSpacing(dp(6), 1f);
         guideMessage.setGravity(Gravity.CENTER);
-        guideMessage.setBackground(TvMenuViews.surface(this, 0xFF101A2B, 0xFF233149, 16));
+        guideMessage.setBackground(TvMenuViews.surface(this, TvMenuViews.PANEL, TvMenuViews.BORDER, 16));
         guidePanel.addView(guideMessage, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         guideFooter = menuText(12, TvMenuViews.MUTED);
@@ -448,10 +499,10 @@ public class MainActivity extends Activity {
 
         LinearLayout footer = new LinearLayout(this);
         footer.setGravity(Gravity.CENTER_VERTICAL);
-        TextView disclaimer = menuText(11, 0xFF718199);
+        TextView disclaimer = menuText(11, TvMenuViews.MUTED);
         disclaimer.setText(R.string.tv_schedule_disclaimer);
         footer.addView(disclaimer);
-        navigationHint = menuText(12, 0xFFB4C3DA);
+        navigationHint = menuText(12, 0xFFB8BEB5);
         navigationHint.setGravity(Gravity.END);
         footer.addView(navigationHint, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -647,21 +698,28 @@ public class MainActivity extends Activity {
             if (!pendingProgramFocus && row != null && row.getHeight() > 0 && row.getTop() >= 0
                     && row.getBottom() <= guideList.getHeight()) {
                 pendingProgramFocus = false;
+                guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
                 row.requestFocus();
             } else {
                 // A recycled row can only receive focus after ListView lays it out.
+                // Hold focus on the list itself while its old focused child is
+                // detached, so Android cannot move the focus into another column.
                 pendingProgramFocus = true;
+                guideList.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                guideList.requestFocus();
                 guideList.setSelectionFromTop(selectedProgramIndex, 0);
             }
         } else {
             pendingProgramFocus = false;
             selectedProgramIndex = -1;
+            guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             guideRefresh.requestFocus();
         }
     }
 
     private void enterProgramGuide() {
         guideFocused = true;
+        channelScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         ProgramGuide guide = programGuideManager.state(CHANNELS[selectedChannelIndex].code).guide;
         selectedProgramIndex = guide == null || guide.programs.isEmpty()
                 ? -1 : guide.suggestedIndex(System.currentTimeMillis());
@@ -671,6 +729,8 @@ public class MainActivity extends Activity {
     private void returnToChannels() {
         guideFocused = false;
         pendingProgramFocus = false;
+        channelScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         channelRows.get(selectedChannelIndex).requestFocus();
     }
 
@@ -701,6 +761,7 @@ public class MainActivity extends Activity {
                 View row = programViewAt(selectedProgramIndex);
                 if (row != null) {
                     pendingProgramFocus = false;
+                    setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
                     row.requestFocus();
                 }
             }
@@ -760,71 +821,111 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void tryStartVideo(int attempt, int generation) {
-        if (webView == null || generation != loadGeneration || attempt > 20) {
+    private String loadPlayerScript() {
+        try (InputStream input = getAssets().open("player.js");
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            throw new IllegalStateException("Missing packaged player script", error);
+        }
+    }
+
+    private boolean isCurrentChannelPage(String url) {
+        if (url == null) {
+            return false;
+        }
+        String path = android.net.Uri.parse(url).getPath();
+        String expected = "/liveTV/" + currentChannel().code;
+        return expected.equals(path) || (expected + "/").equals(path);
+    }
+
+    private void stopVideoChecks() {
+        playbackCheckGeneration++;
+        if (videoRetry != null) {
+            handler.removeCallbacks(videoRetry);
+            videoRetry = null;
+        }
+    }
+
+    private void beginLoading(int message) {
+        videoReady = false;
+        playbackFailed = false;
+        stopVideoChecks();
+        showPlaybackCover(message, false);
+    }
+
+    private void showPlaybackCover(int message, boolean failed) {
+        if (status != null) {
+            handler.removeCallbacks(hideStatus);
+            status.setVisibility(View.GONE);
+        }
+        if (loadingView != null) {
+            loadingView.show(currentChannel().name, currentChannelIndex, CHANNELS.length,
+                    message, failed);
+        }
+    }
+
+    private void showPlaybackFailure() {
+        if (exiting) {
             return;
         }
-        String script = "(function(){"
-                + "var v=document.querySelector('video');"
-                + "if(!v)return 'waiting';"
-                + "var style=document.getElementById('cztv-tv-fullscreen-style');"
-                + "if(!style){style=document.createElement('style');"
-                + "style.id='cztv-tv-fullscreen-style';"
-                + "(document.head||document.documentElement).appendChild(style);}"
-                + "style.textContent='html,body{margin:0!important;padding:0!important;"
-                + "width:100%!important;height:100%!important;overflow:hidden!important;"
-                + "background:#000!important;visibility:visible!important;}"
-                + "video{position:fixed!important;left:0!important;top:0!important;"
-                + "width:100vw!important;height:100vh!important;max-width:none!important;"
-                + "max-height:none!important;object-fit:contain!important;background:#000!important;"
-                + "visibility:visible!important;z-index:2147483647!important;}';"
-                + "var path=v;"
-                + "while(path&&path.parentElement){"
-                + "var parent=path.parentElement;"
-                + "for(var i=0;i<parent.children.length;i++){"
-                + "if(parent.children[i]!==path)parent.children[i].style.display='none';}"
-                + "path=parent;"
-                + "if(parent===document.body)break;"
-                + "}"
-                + "path=v;"
-                + "while(path&&path!==document.documentElement){"
-                + "path.style.margin='0';path.style.padding='0';"
-                + "path.style.width='100vw';path.style.height='100vh';"
-                + "path.style.maxWidth='none';path.style.maxHeight='none';"
-                + "path.style.background='#000';"
-                + "if(path!==v){path.style.position='fixed';path.style.left='0';path.style.top='0';}"
-                + "path=path.parentElement;"
-                + "}"
-                + "if(document.body)document.body.style.visibility='visible';"
-                + "v.style.display='block';v.style.position='fixed';v.style.left='0';v.style.top='0';"
-                + "v.style.width='100vw';v.style.height='100vh';v.style.objectFit='contain';"
-                + "v.defaultMuted=false;v.muted=false;v.volume=1;"
-                + "try{v.setAttribute('playsinline','');v.setAttribute('webkit-playsinline','');}catch(e){}"
-                + "var p=v.play();if(p&&p.catch)p.catch(function(){});"
-                + "return v.paused?'pending':'playing';"
-                + "})()";
-        webView.evaluateJavascript(script, value -> {
-            if (generation != loadGeneration || webView == null) {
+        stopVideoChecks();
+        videoReady = false;
+        playbackFailed = true;
+        showPlaybackCover(R.string.loading_failed, true);
+    }
+
+    private void startVideoCheck(boolean userInitiated) {
+        if (webView == null || exiting || !foregroundActive) {
+            return;
+        }
+        if (userInitiated && playbackFailed) {
+            reloadCurrentChannel();
+            return;
+        }
+        stopVideoChecks();
+        checkVideoFrame(0, loadGeneration, playbackCheckGeneration, userInitiated);
+    }
+
+    private void checkVideoFrame(int attempt, int generation, int checkGeneration,
+                                 boolean userInitiated) {
+        if (webView == null || exiting || !foregroundActive || generation != loadGeneration
+                || checkGeneration != playbackCheckGeneration) {
+            return;
+        }
+        webView.evaluateJavascript(playerScript + "(" + (userInitiated && attempt == 0) + ")", value -> {
+            if (webView == null || exiting || !foregroundActive || generation != loadGeneration
+                    || checkGeneration != playbackCheckGeneration) {
                 return;
             }
-            boolean playing = value != null && value.contains("playing");
-            if (value == null || value.contains("waiting") || !playing) {
-                if (attempt >= 20) {
-                    setStatus("按确认键开始有声播放");
-                } else {
-                    handler.postDelayed(
-                            () -> tryStartVideo(attempt + 1, generation),
-                            900
-                    );
-                }
-            } else {
+            if ("\"playing\"".equals(value)) {
+                videoReady = true;
+                playbackFailed = false;
+                loadingView.setVisibility(View.GONE);
                 setStatus(channelBadge());
+            } else if ("\"blocked\"".equals(value)) {
+                videoReady = false;
+                showPlaybackCover(R.string.loading_blocked, true);
+            } else if ("\"error\"".equals(value) || (attempt >= 59 && !menuVisible)) {
+                showPlaybackFailure();
+            } else {
+                if (!videoReady && "\"pending\"".equals(value)) {
+                    showPlaybackCover(R.string.loading_buffering, false);
+                }
+                videoRetry = () -> checkVideoFrame(Math.min(attempt + 1, 59), generation,
+                        checkGeneration, false);
+                handler.postDelayed(videoRetry, menuVisible ? 1000 : 400);
             }
         });
     }
 
     private void startVideoWithSound() {
-        tryStartVideo(0, loadGeneration);
+        startVideoCheck(true);
     }
 
     private void switchChannel(int index) {
@@ -839,7 +940,7 @@ public class MainActivity extends Activity {
         loadGeneration++;
         setMenuVisible(false);
         refreshProgramGuide(false);
-        setStatus("正在切换到 " + currentChannel().name + "…");
+        beginLoading(R.string.loading_switching);
         if (webView != null) {
             webView.stopLoading();
             webView.loadUrl(channelUrl(currentChannelIndex));
@@ -848,11 +949,11 @@ public class MainActivity extends Activity {
     }
 
     private void reloadCurrentChannel() {
-        if (webView == null || exiting) {
+        if (webView == null || exiting || !foregroundActive) {
             return;
         }
         loadGeneration++;
-        setStatus("正在恢复 " + currentChannel().name + "…");
+        beginLoading(R.string.loading_retrying);
         webView.stopLoading();
         webView.loadUrl(channelUrl(currentChannelIndex));
         webView.requestFocus(View.FOCUS_DOWN);
@@ -892,6 +993,8 @@ public class MainActivity extends Activity {
         }
         guideFocused = false;
         pendingProgramFocus = false;
+        channelScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         handler.removeCallbacks(updateVisibleMenu);
         menuUpdatePosted = false;
         if (visible) {
@@ -935,6 +1038,9 @@ public class MainActivity extends Activity {
             channelMenu.setVisibility(View.GONE);
             if (webView != null) {
                 webView.requestFocus(View.FOCUS_DOWN);
+                if (!videoReady && !playbackFailed) {
+                    startVideoCheck(false);
+                }
             }
         }
         if (BuildConfig.DEBUG) {
@@ -982,13 +1088,6 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private GradientDrawable roundBackground(int color, float radiusDp) {
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(color);
-        background.setCornerRadius(radiusDp * getResources().getDisplayMetrics().density);
-        return background;
-    }
-
     private boolean isActivationKey(int keyCode) {
         return keyCode == KeyEvent.KEYCODE_DPAD_CENTER
                 || keyCode == KeyEvent.KEYCODE_ENTER
@@ -1013,7 +1112,9 @@ public class MainActivity extends Activity {
             if (down && menuVisible && event.getRepeatCount() == 0) {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     if (guideFocused) {
+                        pendingProgramFocus = false;
                         selectedProgramIndex = -1;
+                        guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
                         guideRefresh.requestFocus();
                     } else {
                         enterProgramGuide();
@@ -1104,6 +1205,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foregroundActive = false;
+        stopVideoChecks();
         handler.removeCallbacks(refreshPrograms);
         if (!exiting && !isFinishing()) {
             reloadOnResume = true;

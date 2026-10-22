@@ -24,10 +24,18 @@
     <string name="tv_channel_count">%1$d 个频道</string>
     <string name="tv_channel_number">%1$02d</string>
     <string name="tv_watching">正在看</string>
-    <string name="tv_now_watching">● %1$s · 直播中</string>
+    <string name="tv_now_watching">%1$s · 直播中</string>
     <string name="tv_guide_label">全天节目单</string>
     <string name="tv_schedule_disclaimer">节目以实际播出为准</string>
     <string name="tv_remote_channels">↑↓ 选择 · → 节目单 · OK 看直播 · 返回 关闭</string>
     <string name="tv_remote_programs">↑↓ 浏览 · → 刷新 · ← 频道 · OK 返回直播</string>
     <string name="tv_remote_refresh">OK 更新 · ↓ 节目单 · ← 频道 · 返回 频道</string>
+    <string name="loading_connecting">正在连接直播</string>
+    <string name="loading_buffering">正在准备画面</string>
+    <string name="loading_switching">正在切换频道</string>
+    <string name="loading_retrying">正在重新连接</string>
+    <string name="loading_blocked">按 OK 开始有声播放</string>
+    <string name="loading_failed">暂时无法连接直播\n按 OK 重试，或按菜单选择频道</string>
+    <string name="loading_live_label">浙江频道 · 实时直播</string>
+    <string name="loading_remote_hint">菜单 查看节目单　·　↑↓ 切换频道</string>
 </resources>
