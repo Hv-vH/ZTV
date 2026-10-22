@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">新蓝 TV</string>
-    <string name="channels">频道</string>
-    <string name="channel_menu_hint">↑↓ 选择 · OK 播放 · → 节目单</string>
     <string name="channel_row">%1$d  %2$s\n当前节目：%3$s</string>
-    <string name="guide_title">%1$s · 今日节目单</string>
+    <string name="guide_title">%1$s</string>
     <string name="guide_date">%1$s · 北京时间</string>
     <string name="guide_refresh">刷新</string>
-    <string name="guide_navigation_hint">↑↓ 浏览（可长按） · → 刷新 · ← 频道 · OK 看直播\n节目以实际播出为准</string>
     <string name="guide_loading_short">读取中…</string>
     <string name="guide_unavailable">暂无节目信息</string>
     <string name="guide_loading">正在读取全天节目单…</string>
@@ -18,8 +15,19 @@
     <string name="guide_cached_error">更新失败，暂时显示上次节目单；将自动重试</string>
     <string name="guide_updated">%1$s 更新 · 全天共 %2$d 项节目</string>
     <string name="guide_next_day">次日 %1$s</string>
-    <string name="guide_live">▶ 正在播出</string>
+    <string name="guide_live">正在播出</string>
     <string name="guide_past">已播出</string>
     <string name="guide_upcoming">待播出</string>
     <string name="guide_program_row">%1$s–%2$s  %3$s\n%4$s</string>
+    <string name="tv_brand_subtitle">浙江频道 · 电视直播</string>
+    <string name="tv_all_channels">全部频道</string>
+    <string name="tv_channel_count">%1$d 个频道</string>
+    <string name="tv_channel_number">%1$02d</string>
+    <string name="tv_watching">正在看</string>
+    <string name="tv_now_watching">● %1$s · 直播中</string>
+    <string name="tv_guide_label">全天节目单</string>
+    <string name="tv_schedule_disclaimer">节目以实际播出为准</string>
+    <string name="tv_remote_channels">↑↓ 选择 · → 节目单 · OK 看直播 · 返回 关闭</string>
+    <string name="tv_remote_programs">↑↓ 浏览 · → 刷新 · ← 频道 · OK 返回直播</string>
+    <string name="tv_remote_refresh">OK 更新 · ↓ 节目单 · ← 频道 · 返回 频道</string>
 </resources>
