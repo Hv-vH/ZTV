@@ -29,7 +29,7 @@
     <string name="tv_schedule_disclaimer">节目以实际播出为准</string>
     <string name="tv_remote_channels">↑↓ 选择 · → 节目单 · OK 看直播 · 返回 关闭</string>
     <string name="tv_remote_programs">↑↓ 浏览 · → 刷新 · ← 频道 · OK 返回直播</string>
-    <string name="tv_remote_refresh">OK 更新 · ↓ 节目单 · ← 频道 · 返回 频道</string>
+    <string name="tv_remote_refresh">OK 更新 · ← 节目单 · ↓ 首节目 · 返回 频道</string>
     <string name="loading_connecting">正在连接直播</string>
     <string name="loading_buffering">正在准备画面</string>
     <string name="loading_switching">正在切换频道</string>

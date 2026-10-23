@@ -89,6 +89,7 @@ public class MainActivity extends Activity {
     private boolean menuUpdatePosted;
     private boolean foregroundActive;
     private int selectedProgramIndex = -1;
+    private ProgramGuide.Program programBeforeRefresh;
     private boolean menuVisible;
     private boolean exiting;
     private boolean hasEnteredForeground;
@@ -628,6 +629,9 @@ public class MainActivity extends Activity {
             boolean sameDayAndChannel = renderedChannelIndex == selectedChannelIndex
                     && renderedGuide != null && guide != null
                     && renderedGuide.date.equals(guide.date);
+            if (!sameDayAndChannel) {
+                programBeforeRefresh = null;
+            }
             int oldFirst = guideList.getFirstVisiblePosition();
             View firstChild = guideList.getChildAt(0);
             int oldTop = firstChild == null ? 0 : firstChild.getTop();
@@ -694,6 +698,7 @@ public class MainActivity extends Activity {
 
     private void focusProgramSelection() {
         if (selectedProgramIndex >= 0 && selectedProgramIndex < programAdapter.getCount()) {
+            programBeforeRefresh = renderedGuide.programs.get(selectedProgramIndex);
             View row = programViewAt(selectedProgramIndex);
             if (!pendingProgramFocus && row != null && row.getHeight() > 0 && row.getTop() >= 0
                     && row.getBottom() <= guideList.getHeight()) {
@@ -732,6 +737,26 @@ public class MainActivity extends Activity {
         channelScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         channelRows.get(selectedChannelIndex).requestFocus();
+    }
+
+    private void returnToProgramGuide() {
+        if (renderedGuide == null || renderedGuide.programs.isEmpty()) {
+            returnToChannels();
+            return;
+        }
+        selectedProgramIndex = renderedGuide.suggestedIndex(System.currentTimeMillis());
+        if (programBeforeRefresh != null) {
+            for (int i = 0; i < renderedGuide.programs.size(); i++) {
+                ProgramGuide.Program program = renderedGuide.programs.get(i);
+                if (program.startTime == programBeforeRefresh.startTime
+                        && program.title.equals(programBeforeRefresh.title)) {
+                    selectedProgramIndex = i;
+                    break;
+                }
+            }
+        }
+        focusProgramSelection();
+        updateNavigationHints();
     }
 
     private void moveProgramSelection(int delta) {
@@ -988,6 +1013,9 @@ public class MainActivity extends Activity {
         }
         long started = SystemClock.uptimeMillis();
         menuVisible = visible;
+        if (loadingView != null) {
+            loadingView.setMotionEnabled(foregroundActive && !visible);
+        }
         if (channelMenu == null) {
             return;
         }
@@ -1121,7 +1149,11 @@ public class MainActivity extends Activity {
                     }
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                     if (guideFocused) {
-                        returnToChannels();
+                        if (selectedProgramIndex < 0) {
+                            returnToProgramGuide();
+                        } else {
+                            returnToChannels();
+                        }
                     }
                 }
             }
@@ -1187,6 +1219,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         foregroundActive = true;
+        loadingView.setMotionEnabled(!menuVisible);
         applyImmersiveMode();
         refreshProgramGuide(true);
         if (webView != null) {
@@ -1205,6 +1238,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foregroundActive = false;
+        loadingView.setMotionEnabled(false);
         stopVideoChecks();
         handler.removeCallbacks(refreshPrograms);
         if (!exiting && !isFinishing()) {

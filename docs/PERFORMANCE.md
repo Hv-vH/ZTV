@@ -54,3 +54,11 @@
 - 30 项节目单单元测试与 7 项播放器脚本测试通过；APK 构建、Android Lint 通过（0 错误，7 个既有警告）。
 
 原始证据在 `app/build/qa/performance/`：`before/` 为原 4K 采样；`before-1080/`、`after-1080/` 为对比三轮的计时、帧统计、meminfo、界面树与异常记录；`after/playback-continuity.json` 为视频连续性检查；`app/build/qa/v04/` 为正式 4K 扩展、加载/重试和截图证据。构建证据不纳入 Git。
+
+## 0.4.1 加载动效
+
+指示条使用一个缓存的 ObjectAnimator，仅平移轨道内的小段 View；没有逐帧布局或资源分配。文本轮询不重新启动它。首帧撤罩、失败、菜单覆盖、后台、窗口不可见与 View 分离时停止，系统禁用动画时采用静态标记。
+
+在原始 4K 软件渲染模拟器中，三张连续截图确认指示段位置变化；加载时 1.1 秒窗口记录到 18 帧，菜单覆盖后同长度窗口为 0 帧。该采样只用于证明运动存在及遮挡后停止，软件渲染下的卡顿数据不能代表物理电视帧率。新增焦点/菜单回归含 20 次连续开关，未出现卡死；旧版本的完整性能对比不重复计入本次测试。
+
+证据：`app/build/qa/v041/motion-positions.json`、`loading-frames.txt`、`loading-menu-frames.txt`、`ui-checks.json` 与 `loading-checks.json`。

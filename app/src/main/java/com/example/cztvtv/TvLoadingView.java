@@ -1,12 +1,16 @@
 package com.example.cztvtv;
 
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.View;
+import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -18,6 +22,9 @@ final class TvLoadingView extends FrameLayout {
     private final TextView message;
     private final TextView count;
     private final View line;
+    private final View progressSegment;
+    private final ObjectAnimator progressAnimator;
+    private boolean motionEnabled;
     private int displayedIndex = -1;
     private int displayedTotal;
 
@@ -61,11 +68,18 @@ final class TvLoadingView extends FrameLayout {
         center.addView(message, messageParams);
         FrameLayout progress = new FrameLayout(context);
         progress.setBackgroundColor(0xFF343B32);
-        View segment = new View(context);
-        segment.setBackgroundColor(TvMenuViews.AMBER);
+        progress.setClipChildren(true);
+        progressSegment = new View(context);
+        progressSegment.setBackgroundColor(TvMenuViews.AMBER);
+        progressSegment.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LayoutParams segmentParams = new LayoutParams(dp(44), LayoutParams.MATCH_PARENT);
-        segmentParams.leftMargin = dp(46);
-        progress.addView(segment, segmentParams);
+        progress.addView(progressSegment, segmentParams);
+        progressSegment.setTranslationX(dp(56));
+        progressAnimator = ObjectAnimator.ofFloat(progressSegment, View.TRANSLATION_X,
+                -dp(44), dp(156));
+        progressAnimator.setDuration(1450);
+        progressAnimator.setInterpolator(new LinearInterpolator());
+        progressAnimator.setRepeatCount(ValueAnimator.INFINITE);
         LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(dp(156), dp(2));
         progressParams.topMargin = dp(28);
         center.addView(progress, progressParams);
@@ -106,6 +120,61 @@ final class TvLoadingView extends FrameLayout {
         }
         line.setVisibility(failed ? View.INVISIBLE : View.VISIBLE);
         setVisibility(View.VISIBLE);
+        updateMotion();
+    }
+
+    void setMotionEnabled(boolean enabled) {
+        motionEnabled = enabled;
+        updateMotion();
+    }
+
+    private void updateMotion() {
+        // Visibility callbacks can run before construction has finished.
+        if (progressAnimator == null) {
+            return;
+        }
+        boolean systemMotion = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || ValueAnimator.areAnimatorsEnabled();
+        if (motionEnabled && systemMotion && isAttachedToWindow() && isShown()
+                && getWindowVisibility() == View.VISIBLE && line.getVisibility() == View.VISIBLE) {
+            // Status polling must not restart the animation every 400 ms.
+            if (!progressAnimator.isStarted()) {
+                progressAnimator.start();
+            }
+        } else {
+            stopMotion();
+        }
+    }
+
+    private void stopMotion() {
+        if (progressAnimator != null) {
+            progressAnimator.cancel();
+            progressSegment.setTranslationX(dp(56));
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        updateMotion();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        stopMotion();
+        super.onDetachedFromWindow();
+    }
+
+    @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        updateMotion();
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        updateMotion();
     }
 
     private int dp(int value) {

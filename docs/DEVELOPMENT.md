@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-- 应用名称：新蓝 TV；版本：`0.4.0`，`versionCode = 7`。
+- 应用名称：新蓝 TV；版本：`0.4.1`，`versionCode = 8`。
 - 应用 ID：`com.example.cztvtv`。
 - 目标设备：Android TV / Google TV，横屏、遥控器操作。
 - 技术栈：Java 17、Android 原生 Activity / View、WebView；没有额外的应用层依赖。
@@ -29,7 +29,7 @@
 | `createWebView()` | WebView 配置、页面回调、主框架导航限制 |
 | `startVideoCheck()`、`checkVideoFrame()` | 单一首帧检查链；代次隔离旧回调，前台约 24 秒超时，菜单中暂缓超时 |
 | `app/src/main/assets/player.js` | 一次布置全屏样式、移除海报与控件；使用视频帧回调确认可显示，旧 WebView 有兼容分支 |
-| `TvLoadingView.java` | 频道加载、缓冲、按 OK 播放、网络失败与重试提示 |
+| `TvLoadingView.java` | 首帧加载遮罩、循环指示条及生命周期管理、网络失败与重试提示 |
 | `TvMenuViews.java` | 缓存字体与背景；暖白焦点、琥珀直播、可复用节目卡片 |
 | `switchChannel()`、`reloadCurrentChannel()` | 切台、重新加载与加载代次控制 |
 | `refreshProgramGuide()`、`renderProgramGuide()` | 刷新数据并显示全天列表、当前节目、加载 / 失败 / 空列表状态 |
@@ -50,7 +50,7 @@
 | 上 / 下 | 切换上一 / 下一频道，首尾循环 | 频道区循环选择；节目单区浏览列表，可长按连续滚动 |
 | OK / Enter | 再次尝试有声播放 | 当前频道直接关闭菜单并保持播放；其他频道才加载切台；焦点在“刷新”时重新获取节目单 |
 | 菜单 | 打开频道菜单 | 关闭频道菜单 |
-| 左 | 消费事件 | 节目单区返回频道区；频道区保持当前位置 |
+| 左 | 消费事件 | 刷新 → 刚才浏览的节目 → 频道；频道区保持当前位置，无节目时刷新直接返回频道 |
 | 右 | 消费事件 | 频道区进入节目单并定位当前节目；节目单区直达“刷新” |
 | 返回 / Esc | 结束应用任务 | 节目单区返回频道区；频道区关闭菜单 |
 | Home 后重新进入 | 重新加载当前频道以恢复播放 | 菜单在进入后台时关闭 |
@@ -102,6 +102,7 @@
 - 已用 `aapt dump badging` 核对包名、版本、SDK 与 TV 启动入口。
 - 已用 `apksigner verify --verbose` 验证 Debug APK 签名通过；工具提示一个 `META-INF` 元数据条目不受签名保护。
 - 0.4.0 已安装到 Android TV API 36、arm64 的 Television 4K 模拟器，通过 15 项遥控器与 8 项扩展流程，检查实际界面、焦点、全天 114 项首尾浏览、刷新、返回、切台与 200 次快速开关；延迟连接与断网重试通过。模拟器可播放直播；仍需物理电视验证不同 WebView 和硬件解码环境的兼容性。
+- 0.4.1 的 30 项单元测试和 7 项播放器脚本测试通过；Debug 和已签名 Release 构建成功，Release Lint 为 0 错误、5 项既有警告。修复了 TV 桌面仍使用旧横幅的问题，新增按节目身份恢复的刷新左键导航，以及加载条平移动效。固定签名与正式构建方式见 [RELEASE.md](RELEASE.md)。
 
 视觉方案与本次模拟器检查说明见 [UI_DESIGN.md](UI_DESIGN.md)。物理电视回归时仍应检查断网重试、Home 后返回、跨午夜，以及不同系统 WebView 的兼容性。
 
