@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_blue">#1683FF</color>
-    <color name="overlay_black">#CC000000</color>
-    <color name="text_white">#FFFFFFFF</color>
+    <color name="brand_blue">#639BFF</color>
 </resources>

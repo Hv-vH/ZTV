@@ -110,6 +110,10 @@ final class ProgramGuide {
         return format("HH:mm", time);
     }
 
+    static String displayDayLabel(long time) {
+        return format("M月d日 EEEE", time);
+    }
+
     static long nextDayStart(long time) {
         Calendar calendar = Calendar.getInstance(BROADCAST_ZONE, Locale.CHINA);
         calendar.setTimeInMillis(time);

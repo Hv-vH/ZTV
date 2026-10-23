@@ -4,13 +4,14 @@
 
 ## 当前基线
 
-- 应用名称：新蓝 TV；版本：`0.2.1`，`versionCode = 4`。
+- 应用名称：新蓝 TV；版本：`0.3.0`，`versionCode = 5`。
 - 应用 ID：`com.example.cztvtv`。
 - 目标设备：Android TV / Google TV，横屏、遥控器操作。
 - 技术栈：Java 17、Android 原生 Activity / View、WebView；没有额外的应用层依赖。
 - Android 配置：最低 API 23，编译与目标 API 35。
 - 构建工具：Android Gradle Plugin 8.13.2、Gradle 8.13、Build Tools 35.0.0。
 - Git 初始化提交与 `baseline-2026-10-22` 标签保存接手时的 0.1.1 基线；全天节目单功能在 `feat/daily-program-guide` 分支开发。
+- 电视界面美化位于 `feat/tv-interface` 分支，基于已完成的节目单与 0.2.1 按键修正。
 
 ## 运行方式
 
@@ -32,6 +33,7 @@
 | `ProgramGuide.java` | 不可变节目列表、北京时间、排序去重、节目边界与当前节目判断 |
 | `ProgramGuideRepository.java` | 公开节目接口的网络请求与 JSON 解析 |
 | `ProgramGuideManager.java` | 刷新节流、按频道与日期缓存、重试、异步响应隔离 |
+| `TvMenuViews.java` | 原生频道 / 节目卡片、焦点样式、播出状态与进度条 |
 | `dispatchKeyEvent()` | 遥控器事件分发 |
 | `onResume()`、`onPause()`、`onDestroy()` | 前后台恢复与 WebView 释放 |
 | `app/src/main/AndroidManifest.xml` | 网络权限、TV 启动入口、横屏与硬件加速 |
@@ -91,13 +93,13 @@
 
 - 30 项单元测试全部通过，覆盖解析、空值、毫秒时间、节目交接、间隙与重叠、时区、跨天、缓存、失败重试、请求去重、频道响应隔离和销毁后的回调。
 - 10 个频道真实数据共解析出 1135 个节目；10 个当前节目摘要均解析成功。
-- Debug APK 构建成功；Android Lint 为 0 个错误、9 个警告。报告位于 `app/build/reports/`，警告涉及 SDK / Gradle 更新提示、重复 label、TV 横幅、横屏与备份配置，以及两个未使用的颜色资源。
+- Debug APK 构建成功；Android Lint 为 0 个错误、7 个警告。报告位于 `app/build/reports/`，警告涉及 SDK / Gradle 更新提示、重复 label、TV 横幅、横屏与备份配置。
 - APK 路径：`app/build/outputs/apk/debug/app-debug.apk`。
 - 已用 `aapt dump badging` 核对包名、版本、SDK 与 TV 启动入口。
 - 已用 `apksigner verify --verbose` 验证 Debug APK 签名通过；工具提示一个 `META-INF` 元数据条目不受签名保护。
-- 尚未进行电视真机或模拟器播放验证；构建和签名通过不等于所有频道在设备上均可播放。
+- 0.3.0 已安装到 Android TV API 36、arm64 的 Television 4K 模拟器，检查实际界面、遥控器焦点、完整节目浏览、刷新、返回与切台。模拟器可播放直播；仍需物理电视验证不同 WebView 和硬件解码环境的兼容性。
 
-设备回归时应检查：双栏菜单的长标题与长列表、当前节目定位和绿色标记、长按滚动、右键刷新与焦点保持、快速切换频道、断网重试、Home 后返回刷新，以及午夜自动换日。
+视觉方案与本次模拟器检查说明见 [UI_DESIGN.md](UI_DESIGN.md)。物理电视回归时仍应检查断网重试、Home 后返回、跨午夜，以及不同系统 WebView 的兼容性。
 
 ## Git 跟踪范围
 
