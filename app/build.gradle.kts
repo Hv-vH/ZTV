@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.cztvtv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 4
+        versionName = "0.2.1"
     }
 
     buildTypes {
@@ -32,4 +32,9 @@ android {
     buildFeatures {
         buildConfig = true
     }
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
 }
