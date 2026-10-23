@@ -1,5 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
+}
+
+val releaseKeyFile = rootProject.file("keystore.properties")
+val releaseKey = Properties().apply {
+    if (releaseKeyFile.isFile) {
+        releaseKeyFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -10,12 +19,24 @@ android {
         applicationId = "com.example.cztvtv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 8
+        versionName = "0.4.1"
+    }
+
+    signingConfigs {
+        if (releaseKeyFile.isFile) {
+            create("localRelease") {
+                storeFile = rootProject.file(releaseKey.getProperty("storeFile"))
+                storePassword = releaseKey.getProperty("storePassword")
+                keyAlias = releaseKey.getProperty("keyAlias")
+                keyPassword = releaseKey.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("localRelease")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -31,6 +52,10 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    androidResources {
+        noCompress += "ttf"
     }
 }
 

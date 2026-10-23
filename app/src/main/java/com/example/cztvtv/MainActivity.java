@@ -3,7 +3,7 @@ package com.example.cztvtv;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,21 +11,29 @@ import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -49,10 +57,15 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(2);
     private final List<TvMenuViews.ChannelCard> channelRows = new ArrayList<>();
-    private final List<TvMenuViews.ProgramCard> programRows = new ArrayList<>();
 
     private WebView webView;
     private TextView status;
+    private TvLoadingView loadingView;
+    private String playerScript;
+    private Runnable videoRetry;
+    private int playbackCheckGeneration;
+    private boolean videoReady;
+    private boolean playbackFailed;
     private LinearLayout channelMenu;
     private ProgramGuideManager programGuideManager;
     private TextView guideTitle;
@@ -60,8 +73,8 @@ public class MainActivity extends Activity {
     private TextView guideMessage;
     private TextView guideFooter;
     private TextView guideRefresh;
-    private ScrollView guideScroll;
-    private LinearLayout guideList;
+    private ProgramListView guideList;
+    private ProgramAdapter programAdapter;
     private ScrollView channelScroll;
     private TextView menuClock;
     private TextView menuDay;
@@ -72,8 +85,11 @@ public class MainActivity extends Activity {
     private long nextProgramRowUpdate;
     private long lastProgramRenderTime;
     private boolean guideFocused;
+    private boolean pendingProgramFocus;
+    private boolean menuUpdatePosted;
     private boolean foregroundActive;
     private int selectedProgramIndex = -1;
+    private ProgramGuide.Program programBeforeRefresh;
     private boolean menuVisible;
     private boolean exiting;
     private boolean hasEnteredForeground;
@@ -81,6 +97,14 @@ public class MainActivity extends Activity {
     private int currentChannelIndex = 4; // 默认打开 106：民生休闲
     private int selectedChannelIndex = 4;
     private int loadGeneration;
+
+    private final Runnable updateVisibleMenu = () -> {
+        menuUpdatePosted = false;
+        if (menuVisible && foregroundActive && !exiting) {
+            updateMenuRows();
+            renderProgramGuide();
+        }
+    };
 
     private final Runnable hideStatus = () -> {
         if (status != null) {
@@ -132,6 +156,8 @@ public class MainActivity extends Activity {
                     }
                 }, this::onProgramGuideChanged
         );
+        TvMenuViews.prepare(this);
+        playerScript = loadPlayerScript();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -141,6 +167,12 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
         ));
+
+        loadingView = new TvLoadingView(this);
+        root.addView(loadingView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        loadingView.show(currentChannel().name, currentChannelIndex, CHANNELS.length,
+                R.string.loading_connecting, false);
 
         status = createStatusView();
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
@@ -198,6 +230,10 @@ public class MainActivity extends Activity {
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
+                if (!isCurrentChannelPage(url)) {
+                    return;
+                }
+                beginLoading(R.string.loading_connecting);
                 // 页面加载期间先保持黑屏，避免把网页头部、频道列表短暂显示到电视上。
                 v.evaluateJavascript(
                         "(function(){document.documentElement.style.background='#000';"
@@ -209,8 +245,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
-                setStatus("正在连接 " + currentChannel().name + "…");
-                tryStartVideo(0, loadGeneration);
+                if (isCurrentChannelPage(url) && !playbackFailed) {
+                    startVideoCheck(false);
+                }
             }
 
             @Override
@@ -231,13 +268,31 @@ public class MainActivity extends Activity {
                     WebResourceRequest request,
                     android.webkit.WebResourceError error
             ) {
-                if (request.isForMainFrame()) {
-                    setStatus("网页加载失败，请检查电视网络");
+                if (request.isForMainFrame()
+                        && isCurrentChannelPage(request.getUrl().toString())) {
+                    showPlaybackFailure();
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView v, WebResourceRequest request,
+                                            WebResourceResponse response) {
+                if (request.isForMainFrame() && response.getStatusCode() >= 400
+                        && isCurrentChannelPage(request.getUrl().toString())) {
+                    showPlaybackFailure();
                 }
             }
         });
 
+        android.graphics.Bitmap emptyPoster = android.graphics.Bitmap.createBitmap(
+                1, 1, android.graphics.Bitmap.Config.ARGB_8888);
+        emptyPoster.eraseColor(Color.BLACK);
         view.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public android.graphics.Bitmap getDefaultVideoPoster() {
+                return emptyPoster;
+            }
+
             @Override
             public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
                 if (BuildConfig.DEBUG) {
@@ -252,11 +307,13 @@ public class MainActivity extends Activity {
     }
 
     private TextView createStatusView() {
-        TextView view = new TextView(this);
-        view.setTextColor(Color.WHITE);
-        view.setTextSize(16);
+        TextView view = TvMenuViews.text(this, 14, TvMenuViews.TEXT, false);
         view.setPadding(dp(18), dp(10), dp(18), dp(10));
-        view.setBackground(TvMenuViews.surface(this, 0xEE101D32, 0xFF345075, 12));
+        view.setBackground(TvMenuViews.surface(this, 0xF21A1E1B, TvMenuViews.BORDER, 12));
+        android.graphics.drawable.Drawable signal = getDrawable(R.drawable.live_signal);
+        signal.setBounds(0, 0, dp(18), dp(18));
+        view.setCompoundDrawables(signal, null, null, null);
+        view.setCompoundDrawablePadding(dp(8));
         return view;
     }
 
@@ -264,13 +321,12 @@ public class MainActivity extends Activity {
         LinearLayout overlay = new LinearLayout(this);
         overlay.setOrientation(LinearLayout.VERTICAL);
         overlay.setPadding(dp(32), dp(22), dp(32), dp(16));
-        overlay.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR, new int[]{0xFF101A2D, 0xFF080F1C}));
+        overlay.setBackgroundColor(TvMenuViews.BACKGROUND);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         ImageView brand = new ImageView(this);
-        brand.setImageResource(R.drawable.ic_brand);
+        brand.setImageResource(R.drawable.brand_mark);
         header.addView(brand, new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout brandText = new LinearLayout(this);
         brandText.setOrientation(LinearLayout.VERTICAL);
@@ -287,15 +343,19 @@ public class MainActivity extends Activity {
         header.addView(brandText, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        watchingInfo = menuText(13, TvMenuViews.MINT);
+        watchingInfo = menuText(13, TvMenuViews.AMBER);
         watchingInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
-        watchingInfo.setBackground(TvMenuViews.surface(this, 0xFF123330, 0xFF24544C, 8));
+        watchingInfo.setBackground(TvMenuViews.surface(this, 0xFF25251F, 0xFF514733, 24));
+        android.graphics.drawable.Drawable signal = getDrawable(R.drawable.live_signal);
+        signal.setBounds(0, 0, dp(21), dp(21));
+        watchingInfo.setCompoundDrawables(signal, null, null, null);
+        watchingInfo.setCompoundDrawablePadding(dp(6));
         header.addView(watchingInfo);
         LinearLayout clockPanel = new LinearLayout(this);
         clockPanel.setOrientation(LinearLayout.VERTICAL);
         clockPanel.setGravity(Gravity.END);
         clockPanel.setPadding(dp(24), 0, 0, 0);
-        menuClock = TvMenuViews.text(this, 25, TvMenuViews.TEXT, true);
+        menuClock = TvMenuViews.numberText(this, 28, TvMenuViews.TEXT);
         clockPanel.addView(menuClock);
         menuDay = menuText(11, TvMenuViews.MUTED);
         LinearLayout.LayoutParams dayParams = new LinearLayout.LayoutParams(
@@ -316,7 +376,7 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(16), dp(12), dp(12));
-        panel.setBackground(TvMenuViews.surface(this, 0xFF101A2B, 0xFF233149, 20));
+        panel.setBackground(TvMenuViews.surface(this, TvMenuViews.PANEL, TvMenuViews.BORDER, 16));
         float screenDp = getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density;
         body.addView(panel, new LinearLayout.LayoutParams(
@@ -345,7 +405,7 @@ public class MainActivity extends Activity {
             TvMenuViews.ChannelCard row = new TvMenuViews.ChannelCard(this);
             bindChannelRow(row, index);
             row.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
+                if (hasFocus && !(menuVisible && guideFocused)) {
                     guideFocused = false;
                     selectedChannelIndex = index;
                     updateNavigationHints();
@@ -374,11 +434,11 @@ public class MainActivity extends Activity {
         heading.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titleGroup = new LinearLayout(this);
         titleGroup.setOrientation(LinearLayout.VERTICAL);
-        TextView kicker = menuText(12, TvMenuViews.BLUE);
+        TextView kicker = menuText(12, TvMenuViews.AMBER);
         kicker.setText(R.string.tv_guide_label);
         kicker.setLetterSpacing(0.08f);
         titleGroup.addView(kicker);
-        guideTitle = TvMenuViews.text(this, 27, TvMenuViews.TEXT, true);
+        guideTitle = TvMenuViews.text(this, 28, TvMenuViews.TEXT, true);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         titleParams.topMargin = dp(7);
@@ -395,9 +455,14 @@ public class MainActivity extends Activity {
         guideRefresh.setFocusableInTouchMode(true);
         guideRefresh.setBackground(TvMenuViews.buttonBackground(this));
         guideRefresh.setOnFocusChangeListener((v, focused) -> {
-            if (focused) {
+            guideRefresh.setTextColor(focused ? TvMenuViews.INK : TvMenuViews.TEXT);
+            guideRefresh.getCompoundDrawables()[0].setTint(
+                    focused ? TvMenuViews.INK : TvMenuViews.TEXT);
+            if (focused && !pendingProgramFocus) {
                 guideFocused = true;
                 selectedProgramIndex = -1;
+                channelScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
                 updateNavigationHints();
             }
         });
@@ -408,21 +473,25 @@ public class MainActivity extends Activity {
         guideDate = menuText(12, TvMenuViews.MUTED);
         guideDate.setPadding(0, dp(10), 0, dp(16));
         guidePanel.addView(guideDate);
-        guideScroll = new ScrollView(this);
-        guideScroll.setFillViewport(true);
-        guideScroll.setVerticalScrollBarEnabled(false);
-        guideScroll.setClipToPadding(false);
-        guideScroll.setPadding(dp(2), dp(2), dp(2), dp(2));
-        guideList = new LinearLayout(this);
-        guideList.setOrientation(LinearLayout.VERTICAL);
-        guideScroll.addView(guideList);
-        guidePanel.addView(guideScroll, new LinearLayout.LayoutParams(
+        guideList = new ProgramListView();
+        guideList.setVerticalScrollBarEnabled(false);
+        guideList.setClipToPadding(false);
+        guideList.setPadding(dp(2), dp(2), dp(2), dp(2));
+        guideList.setDivider(new ColorDrawable(Color.TRANSPARENT));
+        guideList.setDividerHeight(dp(6));
+        guideList.setSelector(new ColorDrawable(Color.TRANSPARENT));
+        guideList.setItemsCanFocus(true);
+        guideList.setFocusable(true);
+        guideList.setFocusableInTouchMode(true);
+        programAdapter = new ProgramAdapter();
+        guideList.setAdapter(programAdapter);
+        guidePanel.addView(guideList, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         guideMessage = menuText(17, TvMenuViews.MUTED);
         guideMessage.setPadding(dp(24), dp(30), dp(24), dp(30));
         guideMessage.setLineSpacing(dp(6), 1f);
         guideMessage.setGravity(Gravity.CENTER);
-        guideMessage.setBackground(TvMenuViews.surface(this, 0xFF101A2B, 0xFF233149, 16));
+        guideMessage.setBackground(TvMenuViews.surface(this, TvMenuViews.PANEL, TvMenuViews.BORDER, 16));
         guidePanel.addView(guideMessage, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         guideFooter = menuText(12, TvMenuViews.MUTED);
@@ -431,10 +500,10 @@ public class MainActivity extends Activity {
 
         LinearLayout footer = new LinearLayout(this);
         footer.setGravity(Gravity.CENTER_VERTICAL);
-        TextView disclaimer = menuText(11, 0xFF718199);
+        TextView disclaimer = menuText(11, TvMenuViews.MUTED);
         disclaimer.setText(R.string.tv_schedule_disclaimer);
         footer.addView(disclaimer);
-        navigationHint = menuText(12, 0xFFB4C3DA);
+        navigationHint = menuText(12, 0xFFB8BEB5);
         navigationHint.setGravity(Gravity.END);
         footer.addView(navigationHint, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -477,17 +546,18 @@ public class MainActivity extends Activity {
     private void updateMenuHeader() {
         if (menuClock != null) {
             long now = System.currentTimeMillis();
-            menuClock.setText(ProgramGuide.displayTime(now));
-            menuDay.setText(ProgramGuide.displayDayLabel(now));
-            watchingInfo.setText(getString(R.string.tv_now_watching, currentChannel().name));
+            TvMenuViews.setTextIfChanged(menuClock, ProgramGuide.displayTime(now));
+            TvMenuViews.setTextIfChanged(menuDay, ProgramGuide.displayDayLabel(now));
+            TvMenuViews.setTextIfChanged(watchingInfo,
+                    getString(R.string.tv_now_watching, currentChannel().name));
         }
     }
 
     private void updateNavigationHints() {
         if (navigationHint != null) {
-            navigationHint.setText(!guideFocused ? R.string.tv_remote_channels
+            TvMenuViews.setTextIfChanged(navigationHint, getString(!guideFocused ? R.string.tv_remote_channels
                     : selectedProgramIndex < 0 ? R.string.tv_remote_refresh
-                    : R.string.tv_remote_programs);
+                    : R.string.tv_remote_programs));
         }
     }
 
@@ -512,9 +582,11 @@ public class MainActivity extends Activity {
         if (!foregroundActive || exiting || isFinishing()) {
             return;
         }
-        updateMenuRows();
-        if (menuVisible) {
-            renderProgramGuide();
+        // Network/focus callbacks may arrive together. Keep hidden UI untouched and
+        // bind the visible menu once on the next main-loop turn.
+        if (menuVisible && !menuUpdatePosted) {
+            menuUpdatePosted = true;
+            handler.post(updateVisibleMenu);
         }
         // New schedules can contain a boundary sooner than the previously scheduled tick.
         handler.removeCallbacks(refreshPrograms);
@@ -531,63 +603,50 @@ public class MainActivity extends Activity {
         Channel channel = CHANNELS[selectedChannelIndex];
         ProgramGuideManager.State state = programGuideManager.state(channel.code);
         ProgramGuide guide = state.guide;
-        guideTitle.setText(getString(R.string.guide_title, channel.name));
-        guideDate.setText(getString(R.string.guide_date, ProgramGuide.displayDate(now)));
+        TvMenuViews.setTextIfChanged(guideTitle, getString(R.string.guide_title, channel.name));
+        TvMenuViews.setTextIfChanged(guideDate,
+                getString(R.string.guide_date, ProgramGuide.displayDate(now)));
         boolean hasPrograms = guide != null && !guide.programs.isEmpty();
-        guideScroll.setVisibility(hasPrograms ? View.VISIBLE : View.GONE);
+        guideList.setVisibility(hasPrograms ? View.VISIBLE : View.GONE);
         guideMessage.setVisibility(hasPrograms ? View.GONE : View.VISIBLE);
         if (!hasPrograms) {
-            guideMessage.setText(state.loading ? R.string.guide_loading
-                    : state.failed ? R.string.guide_error : R.string.guide_empty);
+            TvMenuViews.setTextIfChanged(guideMessage, getString(state.loading ? R.string.guide_loading
+                    : state.failed ? R.string.guide_error : R.string.guide_empty));
         }
         if (state.loading) {
-            guideFooter.setText(R.string.guide_updating);
+            TvMenuViews.setTextIfChanged(guideFooter, getString(R.string.guide_updating));
         } else if (state.failed) {
-            guideFooter.setText(guide == null ? R.string.guide_retry_hint
-                    : R.string.guide_cached_error);
+            TvMenuViews.setTextIfChanged(guideFooter, getString(guide == null ? R.string.guide_retry_hint
+                    : R.string.guide_cached_error));
         } else if (guide != null) {
-            guideFooter.setText(getString(R.string.guide_updated,
+            TvMenuViews.setTextIfChanged(guideFooter, getString(R.string.guide_updated,
                     ProgramGuide.displayTime(state.updatedAt), guide.programs.size()));
         } else {
-            guideFooter.setText(R.string.guide_retry_hint);
+            TvMenuViews.setTextIfChanged(guideFooter, getString(R.string.guide_retry_hint));
         }
 
         if (renderedGuide != guide || renderedChannelIndex != selectedChannelIndex) {
             boolean sameDayAndChannel = renderedChannelIndex == selectedChannelIndex
                     && renderedGuide != null && guide != null
                     && renderedGuide.date.equals(guide.date);
-            int oldScroll = guideScroll.getScrollY();
+            if (!sameDayAndChannel) {
+                programBeforeRefresh = null;
+            }
+            int oldFirst = guideList.getFirstVisiblePosition();
+            View firstChild = guideList.getChildAt(0);
+            int oldTop = firstChild == null ? 0 : firstChild.getTop();
             int oldSelection = selectedProgramIndex;
             ProgramGuide.Program anchor = sameDayAndChannel && oldSelection >= 0
                     && oldSelection < renderedGuide.programs.size()
                     ? renderedGuide.programs.get(oldSelection) : null;
-            guideList.removeAllViews();
-            programRows.clear();
             renderedGuide = guide;
             renderedChannelIndex = selectedChannelIndex;
-            nextProgramRowUpdate = 0;
+            nextProgramRowUpdate = hasPrograms ? guide.nextBoundary(now) : 0;
+            pendingProgramFocus = guideFocused && hasPrograms && oldSelection >= 0;
+            programAdapter.notifyDataSetChanged();
             if (hasPrograms) {
-                for (int i = 0; i < guide.programs.size(); i++) {
-                    final int index = i;
-                    TvMenuViews.ProgramCard row = new TvMenuViews.ProgramCard(this);
-                    row.setOnFocusChangeListener((v, focused) -> {
-                        if (focused) {
-                            guideFocused = true;
-                            selectedProgramIndex = index;
-                            updateNavigationHints();
-                        }
-                    });
-                    row.setOnClickListener(v -> switchChannel(selectedChannelIndex));
-                    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                    );
-                    params.setMargins(0, 0, 0, dp(6));
-                    guideList.addView(row, params);
-                    programRows.add(row);
-                }
                 selectedProgramIndex = sameDayAndChannel
-                        ? Math.min(oldSelection, programRows.size() - 1) : guide.suggestedIndex(now);
+                        ? Math.min(oldSelection, guide.programs.size() - 1) : guide.suggestedIndex(now);
                 if (guideFocused && oldSelection < 0) {
                     selectedProgramIndex = -1;
                 } else if (anchor != null) {
@@ -602,10 +661,9 @@ public class MainActivity extends Activity {
                 if (guideFocused) {
                     focusProgramSelection();
                 } else if (sameDayAndChannel) {
-                    guideScroll.post(() -> guideScroll.scrollTo(0, oldScroll));
+                    guideList.setSelectionFromTop(Math.min(oldFirst, guide.programs.size() - 1), oldTop);
                 } else {
-                    View current = programRows.get(guide.suggestedIndex(now));
-                    guideScroll.post(() -> guideScroll.scrollTo(0, current.getTop()));
+                    guideList.setSelectionFromTop(guide.suggestedIndex(now), 0);
                 }
             } else if (guideFocused) {
                 selectedProgramIndex = -1;
@@ -613,28 +671,20 @@ public class MainActivity extends Activity {
             }
         }
         if (hasPrograms && (clockMovedBack || now >= nextProgramRowUpdate)) {
-            int current = guide.currentIndex(now);
-            for (int i = 0; i < programRows.size(); i++) {
-                ProgramGuide.Program program = guide.programs.get(i);
-                long end = guide.endTime(i);
-                String endText = ProgramGuide.displayTime(end);
-                if (!guide.date.equals(ProgramGuide.dateAt(end))) {
-                    endText = end == ProgramGuide.nextDayStart(program.startTime)
-                            ? "24:00" : getString(R.string.guide_next_day, endText);
+            for (int i = 0; i < guideList.getChildCount(); i++) {
+                TvMenuViews.ProgramCard row = (TvMenuViews.ProgramCard) guideList.getChildAt(i);
+                int position = guideList.getFirstVisiblePosition() + i;
+                if (position < guide.programs.size()) {
+                    programAdapter.bind(row, position, now);
                 }
-                int label = i == current ? R.string.guide_live
-                        : now >= end ? R.string.guide_past : R.string.guide_upcoming;
-                programRows.get(i).bind(program.title,
-                        ProgramGuide.displayTime(program.startTime), endText,
-                        getString(label), i == current, now >= end,
-                        programProgress(guide, i, now));
             }
             nextProgramRowUpdate = guide.nextBoundary(now);
         }
         if (hasPrograms) {
             int current = guide.currentIndex(now);
-            if (current >= 0) {
-                programRows.get(current).updateProgress(programProgress(guide, current, now));
+            View row = programViewAt(current);
+            if (row instanceof TvMenuViews.ProgramCard) {
+                ((TvMenuViews.ProgramCard) row).updateProgress(programProgress(guide, current, now));
             }
         }
     }
@@ -647,16 +697,34 @@ public class MainActivity extends Activity {
     }
 
     private void focusProgramSelection() {
-        if (selectedProgramIndex >= 0 && selectedProgramIndex < programRows.size()) {
-            programRows.get(selectedProgramIndex).requestFocus();
+        if (selectedProgramIndex >= 0 && selectedProgramIndex < programAdapter.getCount()) {
+            programBeforeRefresh = renderedGuide.programs.get(selectedProgramIndex);
+            View row = programViewAt(selectedProgramIndex);
+            if (!pendingProgramFocus && row != null && row.getHeight() > 0 && row.getTop() >= 0
+                    && row.getBottom() <= guideList.getHeight()) {
+                pendingProgramFocus = false;
+                guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+                row.requestFocus();
+            } else {
+                // A recycled row can only receive focus after ListView lays it out.
+                // Hold focus on the list itself while its old focused child is
+                // detached, so Android cannot move the focus into another column.
+                pendingProgramFocus = true;
+                guideList.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                guideList.requestFocus();
+                guideList.setSelectionFromTop(selectedProgramIndex, 0);
+            }
         } else {
+            pendingProgramFocus = false;
             selectedProgramIndex = -1;
+            guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             guideRefresh.requestFocus();
         }
     }
 
     private void enterProgramGuide() {
         guideFocused = true;
+        channelScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         ProgramGuide guide = programGuideManager.state(CHANNELS[selectedChannelIndex].code).guide;
         selectedProgramIndex = guide == null || guide.programs.isEmpty()
                 ? -1 : guide.suggestedIndex(System.currentTimeMillis());
@@ -665,80 +733,224 @@ public class MainActivity extends Activity {
 
     private void returnToChannels() {
         guideFocused = false;
+        pendingProgramFocus = false;
+        channelScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         channelRows.get(selectedChannelIndex).requestFocus();
+    }
+
+    private void returnToProgramGuide() {
+        if (renderedGuide == null || renderedGuide.programs.isEmpty()) {
+            returnToChannels();
+            return;
+        }
+        selectedProgramIndex = renderedGuide.suggestedIndex(System.currentTimeMillis());
+        if (programBeforeRefresh != null) {
+            for (int i = 0; i < renderedGuide.programs.size(); i++) {
+                ProgramGuide.Program program = renderedGuide.programs.get(i);
+                if (program.startTime == programBeforeRefresh.startTime
+                        && program.title.equals(programBeforeRefresh.title)) {
+                    selectedProgramIndex = i;
+                    break;
+                }
+            }
+        }
+        focusProgramSelection();
+        updateNavigationHints();
     }
 
     private void moveProgramSelection(int delta) {
         selectedProgramIndex = Math.max(-1,
-                Math.min(programRows.size() - 1, selectedProgramIndex + delta));
+                Math.min(programAdapter.getCount() - 1, selectedProgramIndex + delta));
         focusProgramSelection();
     }
 
-    private void tryStartVideo(int attempt, int generation) {
-        if (webView == null || generation != loadGeneration || attempt > 20) {
+    private View programViewAt(int index) {
+        int child = index - guideList.getFirstVisiblePosition();
+        if (index < 0 || child < 0 || child >= guideList.getChildCount()) {
+            return null;
+        }
+        View row = guideList.getChildAt(child);
+        return Integer.valueOf(index).equals(row.getTag()) ? row : null;
+    }
+
+    private final class ProgramListView extends ListView {
+        ProgramListView() {
+            super(MainActivity.this);
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            super.onLayout(changed, left, top, right, bottom);
+            if (pendingProgramFocus && menuVisible && guideFocused) {
+                View row = programViewAt(selectedProgramIndex);
+                if (row != null) {
+                    pendingProgramFocus = false;
+                    setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+                    row.requestFocus();
+                }
+            }
+        }
+    }
+
+    private final class ProgramAdapter extends BaseAdapter {
+        @Override
+        public int getCount() {
+            return renderedGuide == null ? 0 : renderedGuide.programs.size();
+        }
+
+        @Override
+        public ProgramGuide.Program getItem(int position) {
+            return renderedGuide.programs.get(position);
+        }
+
+        @Override
+        public long getItemId(int position) {
+            return position;
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            TvMenuViews.ProgramCard row;
+            if (convertView instanceof TvMenuViews.ProgramCard) {
+                row = (TvMenuViews.ProgramCard) convertView;
+            } else {
+                row = new TvMenuViews.ProgramCard(MainActivity.this);
+                row.setOnFocusChangeListener((v, focused) -> {
+                    if (focused && menuVisible && guideFocused && !pendingProgramFocus) {
+                        selectedProgramIndex = (Integer) v.getTag();
+                        updateNavigationHints();
+                    }
+                });
+                row.setOnClickListener(v -> switchChannel(selectedChannelIndex));
+            }
+            bind(row, position, System.currentTimeMillis());
+            return row;
+        }
+
+        void bind(TvMenuViews.ProgramCard row, int position, long now) {
+            ProgramGuide guide = renderedGuide;
+            ProgramGuide.Program program = guide.programs.get(position);
+            long end = guide.endTime(position);
+            String endText = ProgramGuide.displayTime(end);
+            if (!guide.date.equals(ProgramGuide.dateAt(end))) {
+                endText = end == ProgramGuide.nextDayStart(program.startTime)
+                        ? "24:00" : getString(R.string.guide_next_day, endText);
+            }
+            boolean current = program.startTime <= now && now < end;
+            int label = current ? R.string.guide_live
+                    : now >= end ? R.string.guide_past : R.string.guide_upcoming;
+            row.setTag(position);
+            row.bind(program.title, ProgramGuide.displayTime(program.startTime), endText,
+                    getString(label), current, now >= end, programProgress(guide, position, now));
+        }
+    }
+
+    private String loadPlayerScript() {
+        try (InputStream input = getAssets().open("player.js");
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            throw new IllegalStateException("Missing packaged player script", error);
+        }
+    }
+
+    private boolean isCurrentChannelPage(String url) {
+        if (url == null) {
+            return false;
+        }
+        String path = android.net.Uri.parse(url).getPath();
+        String expected = "/liveTV/" + currentChannel().code;
+        return expected.equals(path) || (expected + "/").equals(path);
+    }
+
+    private void stopVideoChecks() {
+        playbackCheckGeneration++;
+        if (videoRetry != null) {
+            handler.removeCallbacks(videoRetry);
+            videoRetry = null;
+        }
+    }
+
+    private void beginLoading(int message) {
+        videoReady = false;
+        playbackFailed = false;
+        stopVideoChecks();
+        showPlaybackCover(message, false);
+    }
+
+    private void showPlaybackCover(int message, boolean failed) {
+        if (status != null) {
+            handler.removeCallbacks(hideStatus);
+            status.setVisibility(View.GONE);
+        }
+        if (loadingView != null) {
+            loadingView.show(currentChannel().name, currentChannelIndex, CHANNELS.length,
+                    message, failed);
+        }
+    }
+
+    private void showPlaybackFailure() {
+        if (exiting) {
             return;
         }
-        String script = "(function(){"
-                + "var v=document.querySelector('video');"
-                + "if(!v)return 'waiting';"
-                + "var style=document.getElementById('cztv-tv-fullscreen-style');"
-                + "if(!style){style=document.createElement('style');"
-                + "style.id='cztv-tv-fullscreen-style';"
-                + "(document.head||document.documentElement).appendChild(style);}"
-                + "style.textContent='html,body{margin:0!important;padding:0!important;"
-                + "width:100%!important;height:100%!important;overflow:hidden!important;"
-                + "background:#000!important;visibility:visible!important;}"
-                + "video{position:fixed!important;left:0!important;top:0!important;"
-                + "width:100vw!important;height:100vh!important;max-width:none!important;"
-                + "max-height:none!important;object-fit:contain!important;background:#000!important;"
-                + "visibility:visible!important;z-index:2147483647!important;}';"
-                + "var path=v;"
-                + "while(path&&path.parentElement){"
-                + "var parent=path.parentElement;"
-                + "for(var i=0;i<parent.children.length;i++){"
-                + "if(parent.children[i]!==path)parent.children[i].style.display='none';}"
-                + "path=parent;"
-                + "if(parent===document.body)break;"
-                + "}"
-                + "path=v;"
-                + "while(path&&path!==document.documentElement){"
-                + "path.style.margin='0';path.style.padding='0';"
-                + "path.style.width='100vw';path.style.height='100vh';"
-                + "path.style.maxWidth='none';path.style.maxHeight='none';"
-                + "path.style.background='#000';"
-                + "if(path!==v){path.style.position='fixed';path.style.left='0';path.style.top='0';}"
-                + "path=path.parentElement;"
-                + "}"
-                + "if(document.body)document.body.style.visibility='visible';"
-                + "v.style.display='block';v.style.position='fixed';v.style.left='0';v.style.top='0';"
-                + "v.style.width='100vw';v.style.height='100vh';v.style.objectFit='contain';"
-                + "v.defaultMuted=false;v.muted=false;v.volume=1;"
-                + "try{v.setAttribute('playsinline','');v.setAttribute('webkit-playsinline','');}catch(e){}"
-                + "var p=v.play();if(p&&p.catch)p.catch(function(){});"
-                + "return v.paused?'pending':'playing';"
-                + "})()";
-        webView.evaluateJavascript(script, value -> {
-            if (generation != loadGeneration || webView == null) {
+        stopVideoChecks();
+        videoReady = false;
+        playbackFailed = true;
+        showPlaybackCover(R.string.loading_failed, true);
+    }
+
+    private void startVideoCheck(boolean userInitiated) {
+        if (webView == null || exiting || !foregroundActive) {
+            return;
+        }
+        if (userInitiated && playbackFailed) {
+            reloadCurrentChannel();
+            return;
+        }
+        stopVideoChecks();
+        checkVideoFrame(0, loadGeneration, playbackCheckGeneration, userInitiated);
+    }
+
+    private void checkVideoFrame(int attempt, int generation, int checkGeneration,
+                                 boolean userInitiated) {
+        if (webView == null || exiting || !foregroundActive || generation != loadGeneration
+                || checkGeneration != playbackCheckGeneration) {
+            return;
+        }
+        webView.evaluateJavascript(playerScript + "(" + (userInitiated && attempt == 0) + ")", value -> {
+            if (webView == null || exiting || !foregroundActive || generation != loadGeneration
+                    || checkGeneration != playbackCheckGeneration) {
                 return;
             }
-            boolean playing = value != null && value.contains("playing");
-            if (value == null || value.contains("waiting") || !playing) {
-                if (attempt >= 20) {
-                    setStatus("按确认键开始有声播放");
-                } else {
-                    handler.postDelayed(
-                            () -> tryStartVideo(attempt + 1, generation),
-                            900
-                    );
-                }
-            } else {
+            if ("\"playing\"".equals(value)) {
+                videoReady = true;
+                playbackFailed = false;
+                loadingView.setVisibility(View.GONE);
                 setStatus(channelBadge());
+            } else if ("\"blocked\"".equals(value)) {
+                videoReady = false;
+                showPlaybackCover(R.string.loading_blocked, true);
+            } else if ("\"error\"".equals(value) || (attempt >= 59 && !menuVisible)) {
+                showPlaybackFailure();
+            } else {
+                if (!videoReady && "\"pending\"".equals(value)) {
+                    showPlaybackCover(R.string.loading_buffering, false);
+                }
+                videoRetry = () -> checkVideoFrame(Math.min(attempt + 1, 59), generation,
+                        checkGeneration, false);
+                handler.postDelayed(videoRetry, menuVisible ? 1000 : 400);
             }
         });
     }
 
     private void startVideoWithSound() {
-        tryStartVideo(0, loadGeneration);
+        startVideoCheck(true);
     }
 
     private void switchChannel(int index) {
@@ -753,7 +965,7 @@ public class MainActivity extends Activity {
         loadGeneration++;
         setMenuVisible(false);
         refreshProgramGuide(false);
-        setStatus("正在切换到 " + currentChannel().name + "…");
+        beginLoading(R.string.loading_switching);
         if (webView != null) {
             webView.stopLoading();
             webView.loadUrl(channelUrl(currentChannelIndex));
@@ -762,11 +974,11 @@ public class MainActivity extends Activity {
     }
 
     private void reloadCurrentChannel() {
-        if (webView == null || exiting) {
+        if (webView == null || exiting || !foregroundActive) {
             return;
         }
         loadGeneration++;
-        setStatus("正在恢复 " + currentChannel().name + "…");
+        beginLoading(R.string.loading_retrying);
         webView.stopLoading();
         webView.loadUrl(channelUrl(currentChannelIndex));
         webView.requestFocus(View.FOCUS_DOWN);
@@ -796,21 +1008,43 @@ public class MainActivity extends Activity {
     }
 
     private void setMenuVisible(boolean visible) {
+        if (menuVisible == visible) {
+            return;
+        }
+        long started = SystemClock.uptimeMillis();
         menuVisible = visible;
+        if (loadingView != null) {
+            loadingView.setMotionEnabled(foregroundActive && !visible);
+        }
         if (channelMenu == null) {
             return;
         }
-        channelMenu.setVisibility(visible ? View.VISIBLE : View.GONE);
         guideFocused = false;
+        pendingProgramFocus = false;
+        channelScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        handler.removeCallbacks(updateVisibleMenu);
+        menuUpdatePosted = false;
         if (visible) {
             selectedChannelIndex = currentChannelIndex;
+            channelMenu.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            // The opaque guide covers the player. Stop composing its hidden video
+            // surface while leaving the page and live audio running.
+            if (webView != null) {
+                webView.setVisibility(View.INVISIBLE);
+            }
+            channelMenu.setVisibility(View.VISIBLE);
             updateMenuRows();
             refreshProgramGuide(false);
             renderProgramGuide();
+            channelMenu.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             if (selectedChannelIndex < channelRows.size()) {
                 channelRows.get(selectedChannelIndex).requestFocus();
                 View current = channelRows.get(selectedChannelIndex);
                 channelScroll.post(() -> {
+                    if (!menuVisible || guideFocused) {
+                        return;
+                    }
                     int target = Math.max(0, current.getTop()
                             - (channelScroll.getHeight() - current.getHeight()) / 2);
                     int aligned = 0;
@@ -823,8 +1057,24 @@ public class MainActivity extends Activity {
                     channelScroll.scrollTo(0, aligned);
                 });
             }
-        } else if (webView != null) {
-            webView.requestFocus(View.FOCUS_DOWN);
+            handler.removeCallbacks(updateVisibleMenu);
+            menuUpdatePosted = false;
+        } else {
+            if (webView != null) {
+                webView.setVisibility(View.VISIBLE);
+            }
+            channelMenu.setVisibility(View.GONE);
+            if (webView != null) {
+                webView.requestFocus(View.FOCUS_DOWN);
+                if (!videoReady && !playbackFailed) {
+                    startVideoCheck(false);
+                }
+            }
+        }
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d("ZtvMenuPerf", (visible ? "open" : "close")
+                    + " bindMs=" + (SystemClock.uptimeMillis() - started)
+                    + " programCount=" + programAdapter.getCount());
         }
     }
 
@@ -866,13 +1116,6 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private GradientDrawable roundBackground(int color, float radiusDp) {
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(color);
-        background.setCornerRadius(radiusDp * getResources().getDisplayMetrics().density);
-        return background;
-    }
-
     private boolean isActivationKey(int keyCode) {
         return keyCode == KeyEvent.KEYCODE_DPAD_CENTER
                 || keyCode == KeyEvent.KEYCODE_ENTER
@@ -897,14 +1140,20 @@ public class MainActivity extends Activity {
             if (down && menuVisible && event.getRepeatCount() == 0) {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     if (guideFocused) {
+                        pendingProgramFocus = false;
                         selectedProgramIndex = -1;
+                        guideList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
                         guideRefresh.requestFocus();
                     } else {
                         enterProgramGuide();
                     }
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                     if (guideFocused) {
-                        returnToChannels();
+                        if (selectedProgramIndex < 0) {
+                            returnToProgramGuide();
+                        } else {
+                            returnToChannels();
+                        }
                     }
                 }
             }
@@ -970,6 +1219,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         foregroundActive = true;
+        loadingView.setMotionEnabled(!menuVisible);
         applyImmersiveMode();
         refreshProgramGuide(true);
         if (webView != null) {
@@ -988,6 +1238,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foregroundActive = false;
+        loadingView.setMotionEnabled(false);
+        stopVideoChecks();
         handler.removeCallbacks(refreshPrograms);
         if (!exiting && !isFinishing()) {
             reloadOnResume = true;

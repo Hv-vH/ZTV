@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="320dp"
-    android:height="180dp"
-    android:viewportWidth="320"
-    android:viewportHeight="180">
-    <path
-        android:fillColor="#07111F"
-        android:pathData="M0,0h320v180H0z" />
-    <path
-        android:fillColor="#1683FF"
-        android:pathData="M40,35h240c5.5,0 10,4.5 10,10v90c0,5.5 -4.5,10 -10,10H40c-5.5,0 -10,-4.5 -10,-10V45c0,-5.5 4.5,-10 10,-10z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M142,58l48,32 -48,32z" />
-</vector>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#141615" />
+            <size android:width="320dp" android:height="180dp" />
+        </shape>
+    </item>
+    <item android:width="104dp" android:height="104dp"
+        android:left="24dp" android:top="38dp" android:gravity="top|left">
+        <bitmap android:src="@drawable/brand_mark" android:gravity="fill" android:filter="true" />
+    </item>
+    <item android:width="156dp" android:height="64dp"
+        android:left="142dp" android:top="58dp" android:gravity="top|left"
+        android:drawable="@drawable/tv_wordmark" />
+</layer-list>

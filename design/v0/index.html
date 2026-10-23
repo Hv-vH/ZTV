@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>新蓝 TV · 界面初稿</title>
+  <style>
+    @font-face{font-family:Source Han;src:url('assets/fonts/SourceHanSansCN-VF.woff2') format('woff2');font-weight:200 900;font-display:swap}
+    @font-face{font-family:Plex;src:url('assets/fonts/IBMPlexSans-Regular.woff2') format('woff2');font-display:swap}
+    :root{--canvas:#141615;--surface:#1a1e1b;--card:#202521;--border:#30372f;--text:#f4f1e8;--muted:#a9aea7;--amber:#ddb477;--focus:#f4f1e8;--ink:#1b211c;--unit:4px;--radius:12px}
+    *{box-sizing:border-box}body{margin:0;background:#090b0a;color:var(--text);font-family:Source Han,sans-serif;font-weight:400}
+    button{font:inherit;cursor:pointer}.review{max-width:1456px;margin:0 auto;padding:28px 32px 36px}.review-header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:20px}
+    .review-title{font-size:17px;font-weight:500}.review-title small{font-size:12px;font-weight:400;color:var(--muted);margin-left:16px}.tabs{display:flex;gap:6px}.tab{border:1px solid var(--border);background:transparent;color:var(--muted);padding:9px 16px;border-radius:7px;font-size:12px}.tab[aria-selected=true]{background:var(--focus);border-color:var(--focus);color:var(--ink)}.tab:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+    .stage{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--canvas);border:1px solid #30372f;border-radius:10px}.tv{position:absolute;width:960px;height:540px;transform-origin:top left;background:var(--canvas);overflow:hidden;padding:22px 32px 16px}
+    .top{height:52px;display:flex;align-items:center;gap:14px}.brand-icon{width:44px;height:44px;object-fit:contain}.brand-name{font-size:22px;line-height:1.25;font-weight:500;letter-spacing:.02em}.brand-subtitle{font-size:12px;line-height:1.4;color:var(--muted);margin-top:5px}.watching{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--amber);padding:9px 13px;border:1px solid #514733;border-radius:24px;background:#25251f}.signal{width:21px;height:21px;object-fit:contain}.clock-panel{text-align:right;margin-left:12px;min-width:114px}.clock{font:28px/1 Plex,sans-serif;letter-spacing:.02em}.day{font-size:11px;color:var(--muted);margin-top:7px}
+    .body{height:388px;display:flex;gap:26px;margin-top:20px}.channels{width:300px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 12px 12px;display:flex;flex-direction:column}.section-label{display:flex;justify-content:space-between;align-items:center;padding:0 8px 14px;font-size:15px;font-weight:500}.section-label span{color:var(--muted);font-size:12px;font-weight:400}.channel-list{overflow:hidden;padding:2px 4px;flex:1}.channel-card{display:flex;align-items:center;min-height:72px;gap:10px;padding:12px;margin-bottom:8px;border-radius:var(--radius);background:var(--card);border:1px solid transparent}.channel-number{width:24px;flex-shrink:0;font:15px Plex,sans-serif;color:var(--muted);text-align:center}.channel-copy{min-width:0;flex:1}.channel-heading{display:flex;align-items:center;gap:6px}.channel-name{font-size:19px;font-weight:500;flex:1;line-height:1.25;white-space:nowrap}.watch-badge{font-size:10px;background:#3b3529;color:var(--amber);padding:3px 6px;border-radius:5px;white-space:nowrap}.channel-program{font-size:12px;line-height:1.5;color:var(--muted);margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.channel-card.focused{background:var(--focus);color:var(--ink)}.channel-card.focused .channel-number,.channel-card.focused .channel-program{color:#535c51}.channel-card.focused .watch-badge{background:#ddd8ca;color:#50452e}.channel-card.watching:not(.focused){border-color:#6e5d40;background:#29281f}
+    .guide{min-width:0;flex:1;padding-top:4px;display:flex;flex-direction:column}.guide-top{display:flex;align-items:center;justify-content:space-between;gap:16px}.eyebrow{font-size:12px;color:var(--amber);line-height:1.25;letter-spacing:.08em}.channel-title{font-size:28px;font-weight:500;line-height:1.3;margin-top:6px;letter-spacing:.02em}.refresh{display:flex;align-items:center;gap:8px;padding:11px 16px;font-size:14px;border:1px solid #444c42;border-radius:var(--radius);color:var(--text);background:#252b25}.refresh svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7}.date{font-size:12px;color:var(--muted);padding:10px 0 16px}.programs{flex:1;min-height:0;overflow:hidden;padding:2px}.program{display:flex;align-items:center;min-height:68px;padding:12px 14px 12px 16px;margin-bottom:6px;border:1px solid transparent;background:var(--card);border-radius:var(--radius)}.times{width:66px;flex-shrink:0}.time-start{font:21px/1.15 Plex,sans-serif;letter-spacing:.01em}.time-end{font:13px/1.2 Plex,sans-serif;color:var(--muted);margin-top:5px}.program-copy{min-width:0;flex:1;padding:0 14px 0 12px}.program-title{font-size:18px;font-weight:500;line-height:1.45;overflow-wrap:anywhere;text-wrap:pretty}.state-label{font-size:11px;color:var(--muted);white-space:nowrap;padding:5px 8px;background:#2b322b;border-radius:6px}.program.live{border-color:#68583c;background:#29281f}.program.live .time-start,.program.live .state-label{color:var(--amber)}.program.live .state-label{background:#3c3528}.progress{height:3px;background:#514735;border-radius:2px;margin-top:10px;overflow:hidden}.progress i{display:block;height:100%;background:var(--amber);width:0}.program.focused{background:var(--focus);color:var(--ink);border-color:var(--focus)}.program.focused .time-start{color:var(--ink)}.program.focused .time-end{color:#535c51}.program.focused .state-label{background:#ddd8ca;color:#50452e}.program.focused .progress{background:#d1c8b6}.program.focused .progress i{background:#846738}.guide-footer{font-size:12px;color:var(--muted);padding:12px 2px 0;line-height:1.25}
+    .bottom{display:flex;justify-content:space-between;align-items:center;height:28px;margin-top:14px;gap:16px;font-size:12px;color:#b8beb5}.disclaimer{font-size:11px;color:var(--muted)}.remote-key{font-family:Plex,Source Han,sans-serif;color:var(--text);font-size:12px}.remote{display:flex;gap:13px;white-space:nowrap}.remote span{display:flex;gap:5px}
+    .loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:var(--canvas);text-align:center}.loading-icon{width:112px;height:112px;object-fit:contain;margin-bottom:23px}.loading-channel{font-size:28px;line-height:1.3;font-weight:500;letter-spacing:.04em}.loading-state{color:var(--muted);font-size:15px;margin-top:12px}.loading-line{height:2px;width:156px;background:#343b32;margin-top:28px;border-radius:1px;overflow:hidden}.loading-line i{display:block;width:44px;height:2px;background:var(--amber);margin-left:46px}.loading-brand{position:absolute;left:32px;top:29px;font-size:18px;font-weight:500;letter-spacing:.03em}.loading-count{position:absolute;right:32px;top:32px;font:14px Plex,sans-serif;color:var(--muted);letter-spacing:.08em}.loading-count span{color:var(--amber)}.loading-bottom{position:absolute;bottom:32px;left:32px;right:32px;display:flex;justify-content:space-between;color:var(--muted);font-size:12px}.loading-bottom .live-status{display:flex;align-items:center;gap:6px;color:var(--amber)}
+    .notes{display:flex;align-items:flex-start;justify-content:space-between;gap:32px;margin-top:22px;font-size:12px;line-height:1.9;color:var(--muted)}.notes strong{font-weight:500;color:var(--text)}.swatches{display:flex;gap:10px;flex-shrink:0}.swatch{display:flex;align-items:center;gap:6px;font:11px Plex,sans-serif}.swatch i{display:block;width:12px;height:12px;border-radius:3px;border:1px solid #4b5148}.asset-placeholder{font-size:9px;color:var(--muted);width:44px;overflow:hidden}.loading .asset-placeholder{width:112px;margin-bottom:23px}
+    @media(max-width:760px){.review{padding:18px 12px}.review-header{align-items:flex-start;flex-direction:column;gap:12px}.review-title small{display:block;margin:4px 0 0}.notes{flex-direction:column;gap:14px}.tab{padding:8px 13px}.stage{border-radius:6px}}
+  </style>
+</head>
+<body>
+  <main class="review">
+    <div class="review-header">
+      <div class="review-title">新蓝 TV · 界面初稿 <small>01 / 客厅影院 · 配色、字体与图标方向</small></div>
+      <div class="tabs" role="tablist" aria-label="查看初稿状态">
+        <button class="tab" role="tab" aria-selected="true" data-view="channel">频道焦点</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="program">节目焦点</button>
+        <button class="tab" role="tab" aria-selected="false" data-view="loading">视频加载</button>
+      </div>
+    </div>
+    <div class="stage"><section class="tv" aria-label="电视界面预览">
+      <header class="top">
+        <img class="brand-icon" src="assets/brand-icon.png" alt="ZTV 品牌图标">
+        <div><div class="brand-name">新蓝 TV</div><div class="brand-subtitle">浙江频道 · 电视直播</div></div>
+        <div class="watching"><img class="signal" src="assets/live-signal.png" alt="">民生休闲 · 直播中</div>
+        <div class="clock-panel"><div class="clock" id="clock"></div><div class="day" id="day"></div></div>
+      </header>
+      <div class="body">
+        <aside class="channels"><div class="section-label">全部频道 <span>10 个频道</span></div><div class="channel-list" id="channels"></div></aside>
+        <section class="guide"><div class="guide-top"><div><div class="eyebrow">全天节目单</div><div class="channel-title">民生休闲</div></div><div class="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 12a8 8 0 0 0-2.3-5.7"/></svg>刷新</div></div><div class="date" id="date"></div><div class="programs" id="programs"></div><div class="guide-footer" id="guide-footer"></div></section>
+      </div>
+      <footer class="bottom"><span class="disclaimer">节目以实际播出为准</span><div class="remote" id="remote"></div></footer>
+      <section class="loading" id="loading" aria-label="直播加载界面">
+        <div class="loading-brand">新蓝 TV</div><div class="loading-count"><span>05</span> / 10</div>
+        <img class="loading-icon" src="assets/brand-icon.png" alt="ZTV 品牌图标"><div class="loading-channel">民生休闲</div><div class="loading-state">正在连接直播</div><div class="loading-line"><i></i></div>
+        <div class="loading-bottom"><div class="live-status"><img class="signal" src="assets/live-signal.png" alt="">浙江频道 · 实时直播</div><div>菜单 查看节目单<span style="margin:0 12px;color:#535c51">·</span>↑↓ 切换频道</div></div>
+      </section>
+    </section></div>
+    <div class="notes"><div><strong>这版先看视觉方向。</strong> 思源黑体常规 / 中黑，时间数字使用 IBM Plex Sans；图标为本次生成的独立资源。<br>保留双栏与遥控器操作；节目来自网站实际数据快照，无回看和点播。加载页不显示网页播放器控件。</div><div class="swatches"><span class="swatch"><i style="background:#141615"></i>#141615</span><span class="swatch"><i style="background:#f4f1e8"></i>#F4F1E8</span><span class="swatch"><i style="background:#ddb477"></i>#DDB477</span></div></div>
+  </main>
+  <script src="data.js"></script>
+  <script>
+    const data=window.ZTV_SNAPSHOT, captured=new Date(data.capturedAt), now=captured.getTime();
+    const time=t=>new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Shanghai'}).format(new Date(t));
+    document.querySelector('#clock').textContent=time(now);
+    document.querySelector('#day').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Shanghai'}).format(captured);
+    document.querySelector('#date').textContent=new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'long',day:'numeric',timeZone:'Asia/Shanghai'}).format(captured)+' · 北京时间';
+    document.querySelector('#guide-footer').textContent=time(now)+' 更新 · 全天共 '+data.programs.length+' 项节目';
+    const make=(cls,text)=>{const el=document.createElement('div');el.className=cls;if(text!==undefined)el.textContent=text;return el;};
+    const channelList=document.querySelector('#channels');
+    data.channels.forEach((c,index)=>{const row=make('channel-card'+(c.code==='106'?' watching focused':''));row.dataset.code=c.code;row.append(make('channel-number',String(index+1).padStart(2,'0')));const copy=make('channel-copy'),heading=make('channel-heading');heading.append(make('channel-name',c.name));if(c.code==='106')heading.append(make('watch-badge','正在看'));copy.append(heading,make('channel-program',c.program||'暂无节目信息'));row.append(copy);channelList.append(row);});
+    const selected=channelList.querySelector('[data-code="106"]');channelList.scrollTop=Math.max(0,selected.offsetTop-channelList.offsetTop-152);
+    const programs=document.querySelector('#programs');let current=-1;
+    data.programs.forEach((p,index)=>{const next=data.programs[index+1]?.start??new Date(data.date.slice(0,4)+'-'+data.date.slice(4,6)+'-'+data.date.slice(6,8)+'T24:00:00+08:00').getTime();const end=p.duration>0?Math.min(p.start+p.duration,next):next;const live=p.start<=now&&now<end,past=now>=end;const row=make('program'+(live?' live':''));row.dataset.index=index;if(live)current=index;const times=make('times');times.append(make('time-start',time(p.start)),make('time-end',end===next&&time(end)==='00:00'?'24:00':time(end)));const copy=make('program-copy');copy.append(make('program-title',p.title));if(live){const progress=make('progress'),fill=document.createElement('i');fill.style.width=Math.max(0,Math.min(100,(now-p.start)/(end-p.start)*100))+'%';progress.append(fill);copy.append(progress);}row.append(times,copy,make('state-label',live?'正在播出':past?'已播出':'待播出'));programs.append(row);});
+    const currentRow=programs.querySelector(`[data-index="${Math.max(0,current)}"]`);programs.scrollTop=currentRow.offsetTop-programs.offsetTop;
+    function view(mode){document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',b.dataset.view===mode));document.querySelector('#loading').style.display=mode==='loading'?'flex':'none';selected.classList.toggle('focused',mode==='channel');currentRow.classList.toggle('focused',mode==='program');const remote=document.querySelector('#remote');remote.replaceChildren();const hints=mode==='program'?[['↑↓','浏览'],['→','刷新'],['←','频道'],['OK','返回直播']]:[['↑↓','选择'],['→','节目单'],['OK','看直播'],['返回','关闭']];hints.forEach(([key,label])=>{const span=document.createElement('span'),k=document.createElement('b');k.className='remote-key';k.textContent=key;span.append(k,document.createTextNode(label));remote.append(span);});}
+    document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>view(b.dataset.view)));
+    const stage=document.querySelector('.stage'),tv=document.querySelector('.tv');new ResizeObserver(()=>{tv.style.transform=`scale(${stage.clientWidth/960})`;}).observe(stage);
+    document.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{const fallback=document.createElement('span');fallback.className='asset-placeholder';fallback.textContent=img.alt||'[信号图标]';img.replaceWith(fallback);}));
+    view(new URLSearchParams(location.search).get('view')||'channel');
+  </script>
+</body>
+</html>
